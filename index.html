@@ -135,6 +135,13 @@ input[type="checkbox"]{width:20px;height:20px;accent-color:var(--accent)}
 details.warm{margin-top:10px;font-size:14px}
 details.warm summary{cursor:pointer;color:var(--accent);font-weight:600}
 .tip{font-size:12.5px;color:var(--muted);margin-top:2px}
+.seg{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;padding:4px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+.seg button{border:0;background:none;padding:8px 4px;border-radius:7px;font-weight:600;font-size:13px;color:var(--muted)}
+.seg button[aria-selected="true"]{background:var(--accent-soft);color:var(--accent)}
+.daygrid{display:flex;flex-direction:column;gap:8px}
+.dayrow{display:grid;grid-template-columns:36px minmax(0,1fr);gap:8px;align-items:center}
+.dayrow .dname{font-family:var(--display);font-weight:700;font-size:18px}
+.dayrow select{height:42px;min-width:0;width:100%;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:15px;padding:0 8px}
 .del{background:none;border:0;color:var(--muted);padding:4px 8px}
 /* tabbar */
 nav.tabs{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px);padding-left:max(8px,env(safe-area-inset-left,0px));padding-right:max(8px,env(safe-area-inset-right,0px));z-index:20}
@@ -327,8 +334,24 @@ function sessionBase(date) {
   const x = {...peak[wd], key: "b3-" + wd}; if (x.kind==="strength"){const W=WORKOUTS[x.w];x.title=W.title;x.dur=`${W.min} min`;}
   return x;
 }
+// your weekday layout per block: custom.days[block][weekday] = weekday whose session goes there, or "rest"
+const BLOCKS = {b1:"Block 1 · Nov–Feb", b2:"Block 2 · März bis Hyrox", b3:"Block 3 · April bis Heading East"};
+function blockOf(date) { const id = phaseOf(date).id; return BLOCKS[id] ? id : null; }
+function arrangedBase(date) {
+  const s = state.settings, b = blockOf(date), map = b && ((state.custom || {}).days || {})[b];
+  if (!map || date === s.hyrox || date === s.event) return sessionBase(date);
+  const wd = parse(date).getDay(), src = map[wd];
+  if (src === undefined || src === null || Number(src) === wd) return sessionBase(date);
+  if (src === "rest") return {kind:"rest", title:"Ruhetag", dur:"", steps:["Erholung"], moved:true};
+  // the session that normally falls on weekday `src` in this same week
+  let srcDate = addDays(mondayOf(date), (Number(src) + 6) % 7);
+  if (srcDate === s.hyrox || srcDate === s.event || blockOf(srcDate) !== b) srcDate = addDays(srcDate, blockOf(addDays(srcDate, -7)) === b ? -7 : 7);
+  if (blockOf(srcDate) !== b) return sessionBase(date);
+  const x = sessionBase(srcDate);
+  return {...x, moved: true, from: Number(src)};
+}
 function sessionFor(date) {
-  const x = sessionBase(date), o = x.key && x.kind !== "strength" && ((state.custom || {}).sessions || {})[x.key];
+  const x = arrangedBase(date), o = x.key && x.kind !== "strength" && ((state.custom || {}).sessions || {})[x.key];
   if (!o) return x;
   return {...x, ...o, steps: o.steps && o.steps.length ? o.steps : x.steps, note: o.steps ? "" : x.note, edited: true};
 }
@@ -686,6 +709,7 @@ function renderPlan() {
     <p class="muted" style="margin:0;font-size:13px">Übungen tauschen, Sätze und Wiederholungen ändern, Ausdauer-Einheiten umschreiben. Deine Einträge und Gewichtsverläufe bleiben erhalten.</p>
     <div class="editlist">
       ${Object.entries(WORKOUTS).map(([id, w]) => `<button class="editrow" data-editw="${id}"><span><span class="tag k-strength">Kraft</span> ${esc(w.title)}</span><span class="muted">${w.ex.length} Übungen ›</span></button>`).join("")}
+      <button class="editrow" data-editdays="1"><span><span class="tag k-rest">Woche</span> Trainingstage verschieben</span><span class="muted">${Object.keys(state.custom.days || {}).length ? "angepasst " : ""}›</span></button>
       <button class="editrow" data-edits="list"><span><span class="tag k-bike">Ausdauer</span> Rad-, Lauf- und Hyrox-Einheiten</span><span class="muted">›</span></button>
     </div>
   </section>
@@ -757,6 +781,7 @@ function renderPlan() {
     <p id="backupMsg" class="muted" style="margin:0;font-size:13px" aria-live="polite"></p>
   </section>`;
   $view.querySelectorAll("[data-editw]").forEach(b => b.onclick = () => { state.edit = {type:"w", id:b.dataset.editw}; setTab("edit"); });
+  $view.querySelectorAll("[data-editdays]").forEach(b => b.onclick = () => { state.edit = {type:"days", block:blockOf(TODAY) || "b1"}; setTab("edit"); });
   $view.querySelectorAll("[data-edits]").forEach(b => b.onclick = () => { state.edit = {type:"slots"}; setTab("edit"); });
   const conn = document.getElementById("syncConnect");
   if (conn) conn.onclick = async () => {
@@ -861,7 +886,7 @@ function renderProgress() {
 const UNITS = [["", "Wdh."], ["s", "Sekunden"], ["m", "Meter"], ["Schritte", "Schritte"]];
 const SLOT_GROUPS = {b1:"Block 1 · Nov–Feb", "b1f":"Block 1 · Februar", b2:"Block 2 · März", b3r:"Block 3 · Woche nach Hyrox", b3:"Block 3 · Spitzenwochen", b3t:"Block 3 · Taper"};
 const WD_NAMES = ["Sonntag","Montag","Dienstag","Mittwoch","Donnerstag","Freitag","Samstag"];
-function cust() { const c = state.custom; c.ex = c.ex || {}; c.workouts = c.workouts || {}; c.sessions = c.sessions || {}; return c; }
+function cust() { const c = state.custom; c.ex = c.ex || {}; c.workouts = c.workouts || {}; c.sessions = c.sessions || {}; c.days = c.days || {}; return c; }
 function saveWorkout(id, patch) {
   const c = cust(), cur = WORKOUTS[id];
   c.workouts[id] = {title: cur.title, min: cur.min, int: cur.int, ex: [...cur.ex], ...(c.workouts[id] || {}), ...patch};
@@ -874,6 +899,7 @@ function renderEdit() {
   const ed = state.edit || {type:"slots"};
   if (ed.type === "w") return renderEditWorkout(ed.id);
   if (ed.type === "s") return renderEditSlot(ed.key);
+  if (ed.type === "days") return renderEditDays(ed.block);
   // list of endurance slots
   const slots = enduranceSlots();
   let h = backBtn("Zurück zum Plan") + `<p class="muted" style="margin:0">Jede Zeile ist ein fester Platz im Wochenplan. Deine Version gilt für alle Wochen dieses Abschnitts.</p>`;
@@ -888,6 +914,64 @@ function renderEdit() {
   $view.innerHTML = h;
   document.getElementById("editBack").onclick = () => setTab("plan");
   $view.querySelectorAll("[data-slot]").forEach(b => b.onclick = () => { state.edit = {type:"s", key:b.dataset.slot}; render(); window.scrollTo(0,0); });
+}
+
+// a normal week of a block, to label the sessions you can place
+function blockWeek(b) {
+  const s = state.settings;
+  let mon = b === "b1" ? mondayOf(s.start) : b === "b2" ? mondayOf(addDays(s.block1End, 1)) : mondayOf(addDays(s.hyrox, 8));
+  if (b === "b2" && mon < addDays(s.block1End, 1)) mon = addDays(mon, 7);
+  if (b === "b3" && diffDays(s.hyrox, mon) <= 7) mon = addDays(mon, 7);
+  const out = {};
+  for (let i = 0; i < 7; i++) {
+    const d = addDays(mon, i), wd = parse(d).getDay(), x = sessionBase(d);
+    let label = x.kind === "strength" ? (b === "b1" ? WORKOUTS[x.w].title : "Kraft (A, B, C im Wechsel)") : x.title;
+    if (b === "b1" && wd === 0) label = "Lauf locker (ab Februar: Hyrox-Stationen)";
+    out[wd] = {kind: x.kind, label, dur: x.dur};
+  }
+  return out;
+}
+function renderEditDays(b) {
+  const c = cust(); c.days = c.days || {};
+  const week = blockWeek(b), map = c.days[b] || {}, order = [1,2,3,4,5,6,0];
+  const cur = wd => map[wd] === undefined ? wd : map[wd];
+  const kindOf = v => v === "rest" ? "rest" : week[v].kind;
+  // checks
+  const warn = [];
+  const used = order.map(cur).filter(v => v !== "rest");
+  order.forEach(v => { if (week[v].kind !== "rest" && !used.includes(v)) warn.push(`„${week[v].label}“ kommt in der Woche nicht mehr vor.`); });
+  order.forEach(v => { const n = used.filter(u => u === v).length; if (n > 1) warn.push(`„${week[v].label}“ steht ${n}× in der Woche.`); });
+  for (let i = 0; i < 7; i++) { const a = order[i], z = order[(i + 1) % 7]; if (kindOf(cur(a)) === "strength" && kindOf(cur(z)) === "strength") warn.push(`Kraft am ${WD_NAMES[a]} und ${WD_NAMES[z]}: Zwischen zwei Krafteinheiten sollte mindestens ein Tag liegen.`); }
+  if (!order.some(wd => kindOf(cur(wd)) === "rest") && b !== "b1") warn.push("Kein kompletter Ruhetag in der Woche.");
+  if (b === "b1" && !order.some(wd => kindOf(cur(wd)) === "rest" || (cur(wd) === 0))) warn.push("Kein Ruhetag in der Woche. Der Sonntag (Lauf oder frei) ist als Ruhetag gedacht.");
+  $view.innerHTML = backBtn("Zurück zum Plan") + `
+  <div class="seg" role="tablist">${Object.entries(BLOCKS).map(([k, l]) => `<button role="tab" data-blk="${k}" aria-selected="${k === b}">${l.split(" · ")[0]}</button>`).join("")}</div>
+  <section class="card stack">
+    <div><div class="eyebrow">${BLOCKS[b]}</div><h2 style="margin-top:4px">Welche Einheit an welchem Tag?</h2></div>
+    <p class="muted" style="margin:0;font-size:13px">Gilt für jede Woche dieses Blocks. Steigerungen, Entlastungswochen und der Wechsel von A, B und C laufen weiter mit. Hyrox und der Start von Heading East bleiben auf ihrem Datum.</p>
+    <div class="daygrid">${order.map(wd => `
+      <label class="dayrow"><span class="dname">${DAYS[wd]}</span>
+        <select data-day="${wd}">${order.filter(v => week[v].kind !== "rest").map(v => `<option value="${v}"${String(cur(wd)) === String(v) ? " selected" : ""}>${esc(week[v].label)}${week[v].dur ? " · " + esc(week[v].dur) : ""}</option>`).join("")}
+          <option value="rest"${kindOf(cur(wd)) === "rest" ? " selected" : ""}>Ruhetag</option></select></label>`).join("")}
+    </div>
+    ${warn.length ? `<div class="notice">${warn.map(esc).join("<br>")}</div>` : `<p class="muted" style="margin:0;font-size:13px">Jede Einheit kommt genau einmal vor.</p>`}
+    <div class="row" style="flex-wrap:wrap">${c.days[b] ? `<button class="btn ghost" id="days-reset">Originale Tage wiederherstellen</button>` : ""}</div>
+    <p id="days-msg" class="muted" style="margin:0;font-size:13px" aria-live="polite"></p>
+  </section>
+  <p class="muted" style="font-size:13px;margin:0">Aus dem Kraftplan: Beintage nicht direkt vor eine harte Lauf- oder Radeinheit legen. Ideal ist Kraft am selben Tag wie eine lockere Ausdauereinheit, Kraft zuerst oder mindestens 6 Stunden Abstand.</p>`;
+  document.getElementById("editBack").onclick = () => setTab("plan");
+  $view.querySelectorAll("[data-blk]").forEach(t => t.onclick = () => { state.edit = {type:"days", block:t.dataset.blk}; render(); });
+  $view.querySelectorAll("[data-day]").forEach(sel => sel.addEventListener("change", () => {
+    const wd = Number(sel.dataset.day), v = sel.value === "rest" ? (week[wd].kind === "rest" ? wd : "rest") : Number(sel.value);
+    const m = {...(c.days[b] || {})}; m[wd] = v;
+    // drop entries that point to their own day; no entries left = original layout
+    Object.keys(m).forEach(k => { if (String(m[k]) === String(k)) delete m[k]; });
+    if (Object.keys(m).length) c.days[b] = m; else delete c.days[b];
+    persist("custom/main"); renderEditDays(b);
+    document.getElementById("days-msg").textContent = `${WD_NAMES[wd]}: ${kindOf(v) === "rest" ? "Ruhetag" : week[v].label}. Gespeichert.`;
+  }));
+  const rs = document.getElementById("days-reset");
+  if (rs) rs.onclick = () => { delete c.days[b]; persist("custom/main"); renderEditDays(b); document.getElementById("days-msg").textContent = "Originale Tage wiederhergestellt."; };
 }
 
 function renderEditSlot(key) {
