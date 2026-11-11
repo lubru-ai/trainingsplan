@@ -130,6 +130,11 @@ table.list td:last-child{text-align:right}
 .iconbtn:disabled{opacity:.35;cursor:default}
 label.field select{height:40px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;padding:0 8px;font-size:16px;min-width:0}
 input[type="checkbox"]{width:20px;height:20px;accent-color:var(--accent)}
+.phasebox{display:flex;flex-direction:column;gap:2px;margin-top:12px;padding:10px 12px;border-radius:8px;background:var(--accent-soft);font-size:13.5px}
+.phasebox b{color:var(--accent)}
+details.warm{margin-top:10px;font-size:14px}
+details.warm summary{cursor:pointer;color:var(--accent);font-weight:600}
+.tip{font-size:12.5px;color:var(--muted);margin-top:2px}
 .del{background:none;border:0;color:var(--muted);padding:4px 8px}
 /* tabbar */
 nav.tabs{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px);padding-left:max(8px,env(safe-area-inset-left,0px));padding-right:max(8px,env(safe-area-inset-right,0px));z-index:20}
@@ -169,38 +174,44 @@ nav.tabs button[aria-current="page"]{color:var(--accent)}
 // ---------- Plan data (from "Trainingsplan Nov 2026 – Apr 2027") ----------
 const DEFAULTS = { start: "2026-11-02", block1End: "2027-02-28", hyrox: "2027-03-27", event: "2027-04-30", ftp: null };
 
-// exercise: id, name, sets, lo, hi, unit ('kg'|'s'|'m'|'steps'), inc, start
+// Kraftblock nach "Hyrox_Kraftblock_8_Wochen.md", Variante A (3 Einheiten, Ganzkörper A → B → C)
+// sets/lo/hi = Wochen 1–3 (Aufbau), str = Wochen 5–7 (Grundkraft)
+// role: main = Hauptübung (8er-Test in Woche 8), acc = Zusatzübung, steady = Kettlebell (bleibt in Entlastung gleich)
 const EX_BASE = {
-  squat:   {name:"Kniebeuge", sets:4, lo:6, hi:8, inc:5, start:40},
-  rdl:     {name:"Rumänisches Kreuzheben", sets:3, lo:8, hi:10, inc:5},
-  bss:     {name:"Bulgarian Split Squat", sets:3, lo:10, hi:10, inc:2.5, per:"pro Seite"},
-  legcurl: {name:"Beinbeuger Maschine", sets:3, lo:12, hi:12, inc:2.5},
-  plank:   {name:"Plank", sets:3, lo:45, hi:45, unit:"s", bodyweight:true},
-  bench:   {name:"Bankdrücken", sets:4, lo:6, hi:8, inc:2.5, start:40},
-  pull:    {name:"Klimmzüge oder Latzug", sets:4, lo:6, hi:10, inc:2.5},
-  ohp:     {name:"Kurzhantel-Schulterdrücken", sets:3, lo:8, hi:10, inc:2},
-  row:     {name:"Kabelrudern", sets:3, lo:10, hi:10, inc:2.5},
-  face:    {name:"Face Pulls", sets:3, lo:15, hi:15, inc:2.5},
-  dead:    {name:"Kreuzheben", sets:4, lo:5, hi:5, inc:5, start:45},
-  incline: {name:"Kurzhantel-Schrägbankdrücken", sets:3, lo:8, hi:10, inc:2},
-  goblet:  {name:"Goblet Squat", sets:3, lo:10, hi:10, inc:2},
-  farmer:  {name:"Farmers Carry", sets:4, lo:40, hi:40, unit:"m", inc:2},
-  lunge:   {name:"Walking Lunges mit Kurzhanteln", sets:3, lo:20, hi:20, unit:"Schritte", inc:2},
-  // maintenance variants (Block 2/3): 3 × 5 schwer
-  squatM:  {name:"Kniebeuge", sets:3, lo:5, hi:5, inc:5, link:"squat"},
-  benchM:  {name:"Bankdrücken", sets:3, lo:5, hi:5, inc:2.5, link:"bench"},
-  rowM:    {name:"Kabelrudern", sets:3, lo:8, hi:10, inc:2.5, link:"row"},
-  deadM:   {name:"Kreuzheben", sets:3, lo:5, hi:5, inc:5, link:"dead"},
-  ohpM:    {name:"Kurzhantel-Schulterdrücken", sets:3, lo:8, hi:10, inc:2, link:"ohp"},
-  pullM:   {name:"Klimmzüge oder Latzug", sets:3, lo:6, hi:8, inc:2.5, link:"pull"},
+  squat:    {name:"Kniebeuge (Back Squat)", role:"main", sets:3, lo:8, hi:8, str:{sets:4, lo:5, hi:5}, inc:5, start:40, pause:"2,5–3 min"},
+  pull:     {name:"Klimmzüge", role:"acc", sets:3, lo:5, hi:8, str:{sets:4, lo:4, hi:6}, bodyweight:true, pause:"Supersatz", tip:"Bei Bedarf mit Band oder Maschine. Erst Wiederholungen steigern, dann Zusatzgewicht."},
+  bss:      {name:"Bulgarian Split Squat (Kurzhanteln)", role:"acc", sets:3, lo:8, hi:8, str:{sets:3, lo:6, hi:6}, per:"pro Bein", inc:2, pause:"90 s"},
+  suitcase: {name:"Kettlebell Suitcase Carry", role:"steady", sets:3, lo:30, hi:30, unit:"m", per:"pro Seite", inc:4, pause:"60 s", tip:"Kettlebell einseitig, Schultern und Hüfte bleiben waagerecht. Direkter Transfer zum Farmers Carry."},
+  bench:    {name:"Bankdrücken (Langhantel)", role:"main", sets:3, lo:8, hi:8, str:{sets:4, lo:5, hi:5}, inc:2.5, start:40, pause:"2,5 min"},
+  bbrow:    {name:"Langhantelrudern vorgebeugt", role:"acc", sets:3, lo:8, hi:8, str:{sets:4, lo:6, hi:6}, inc:2.5, pause:"Supersatz"},
+  dbpress:  {name:"Schulterdrücken stehend (Kurzhanteln)", role:"acc", sets:3, lo:8, hi:8, str:{sets:3, lo:6, hi:6}, inc:2, pause:"90 s"},
+  halo:     {name:"Kettlebell Halo + Half-Kneeling Press", role:"steady", sets:3, lo:8, hi:8, per:"pro Seite", inc:4, pause:"60 s", tip:"Kettlebell um den Kopf kreisen, dann einarmig drücken. Rippenbogen unten, kein Hohlkreuz."},
+  dead:     {name:"Kreuzheben (konventionell)", role:"main", sets:3, lo:6, hi:6, str:{sets:4, lo:4, hi:4}, inc:5, start:45, pause:"3 min", tip:"Bewusst eine Wiederholung weniger als bei den anderen Hauptübungen: Die Ermüdung der Wirbelsäule ist neben dem Laufen der teuerste Faktor."},
+  pullW:    {name:"Klimmzüge (breiter Griff)", link:"pull", role:"acc", sets:3, lo:5, hi:8, str:{sets:4, lo:4, hi:6}, bodyweight:true, pause:"Supersatz", tip:"Erst Wiederholungen steigern, dann Zusatzgewicht."},
+  lunge:    {name:"Walking Lunges mit Kurzhanteln", role:"acc", sets:3, lo:10, hi:10, str:{sets:3, lo:8, hi:8}, per:"pro Bein", inc:2, pause:"90 s"},
+  tgu:      {name:"Kettlebell Turkish Get-Up (halbe Version)", role:"steady", sets:3, lo:3, hi:3, per:"pro Seite", inc:4, pause:"60 s", tip:"Aus der Rückenlage über Ellbogen und Hand in den Sitz und zurück. Langsam und kontrolliert."},
+  // weitere Übungen, im Editor einsetzbar
+  rdl:      {name:"Rumänisches Kreuzheben", role:"acc", sets:3, lo:8, hi:10, inc:5},
+  legcurl:  {name:"Beinbeuger-Maschine", role:"acc", sets:3, lo:10, hi:10, str:{sets:3, lo:8, hi:8}, inc:2.5},
+  calf:     {name:"Wadenheben stehend", role:"acc", sets:3, lo:12, hi:12, str:{sets:3, lo:10, hi:10}, inc:2.5},
+  hipthrust:{name:"Hip Thrust (Langhantel)", role:"acc", sets:3, lo:10, hi:10, str:{sets:3, lo:8, hi:8}, inc:5},
+  row:      {name:"Kabelrudern eng", role:"acc", sets:3, lo:10, hi:10, str:{sets:3, lo:8, hi:8}, inc:2.5},
+  incline:  {name:"Schrägbankdrücken (Kurzhanteln)", role:"acc", sets:3, lo:10, hi:10, str:{sets:3, lo:8, hi:8}, inc:2},
+  renegade: {name:"Kettlebell Renegade Row", role:"steady", sets:3, lo:6, hi:6, per:"pro Seite", inc:4},
+  ohp:      {name:"Kurzhantel-Schulterdrücken sitzend", role:"acc", sets:3, lo:8, hi:10, inc:2},
+  face:     {name:"Face Pulls", role:"acc", sets:3, lo:15, hi:15, inc:2.5},
+  goblet:   {name:"Goblet Squat", role:"acc", sets:3, lo:10, hi:10, inc:2},
+  farmer:   {name:"Farmers Carry", role:"steady", sets:4, lo:40, hi:40, unit:"m", inc:2},
+  plank:    {name:"Plank", role:"steady", sets:3, lo:45, hi:45, unit:"s", bodyweight:true},
 };
 const WORKOUTS_BASE = {
-  A: {title:"Kraft A – Unterkörper", ex:["squat","rdl","bss","legcurl","plank"], min:75, int:"schwer"},
-  B: {title:"Kraft B – Oberkörper", ex:["bench","pull","ohp","row","face"], min:75, int:"mittel"},
-  C: {title:"Kraft C – Ganzkörper", ex:["dead","incline","goblet","farmer","lunge"], min:75, int:"mittel–schwer"},
-  M1:{title:"Kraft Erhaltung – Ganzkörper 1", ex:["squatM","benchM","rowM"], min:60, int:"schwer, wenig Sätze"},
-  M2:{title:"Kraft Erhaltung – Ganzkörper 2", ex:["deadM","ohpM","pullM"], min:60, int:"schwer, wenig Sätze"},
+  A: {title:"Kraft A – Kniebeuge-Fokus", ex:["squat","pull","bss","suitcase"], min:45, int:""},
+  B: {title:"Kraft B – Bankdrücken-Fokus", ex:["bench","bbrow","dbpress","halo"], min:45, int:""},
+  C: {title:"Kraft C – Kreuzheben-Fokus", ex:["dead","pullW","lunge","tgu"], min:45, int:""},
 };
+const WARMUP = ["5 × Katze-Kuh, 10 × Hüftkreisen pro Seite, 10 × Schulterkreisen mit Band",
+  "10 × Kniebeuge mit Körpergewicht, 10 × Ausfallschritt im Wechsel, 10 × Glute Bridge",
+  "Hauptübung: 2–3 Aufwärmsätze mit steigender Last (leere Stange → ca. 50 % → ca. 75 % des Arbeitsgewichts)"];
 
 // ---------- date helpers ----------
 const pad = n => String(n).padStart(2,"0");
@@ -266,7 +277,7 @@ function sessionBase(date) {
   if (ph === "pre" || ph === "post") return {kind:"rest", title:"Frei", dur:"", steps:["Kein Plan für diesen Tag."]};
 
   if (ph === "b1") {
-    const w = block1Week(date), deload = w % 4 === 0, feb = parse(date).getMonth() === 1;
+    const w = block1Week(date), deload = w % 4 === 0 || w > 16, feb = parse(date).getMonth() === 1;
     const qual = w <= 4 ? {t:"Rad Sweetspot", s:[`3 × 12 min bei ${ftpW(88,93)}, 5 min locker dazwischen`]}
       : (w % 2 === 1 ? {t:"Rad Sweetspot", s:[w <= 8 ? `3 × 15 min bei ${ftpW(88,93)}` : `2 × 20 min bei ${ftpW(88,93)}`, "5 min locker zwischen den Blöcken"]}
                      : {t:"Rad Schwelle", s:[`4 × 8 min bei ${ftpW(95,100)}, 4 min Pause`]});
@@ -285,14 +296,15 @@ function sessionBase(date) {
     if (deload) x.deload = true;
     return x;
   }
+  const rot = () => ["A","B","C"][(Math.floor(diffDays(s.block1End, date) / 7) * 2 + (wd === 5 ? 1 : 0)) % 3];
   if (ph === "b2") {
     const taper = diffDays(date, s.hyrox) <= 6;
     const map = {
-      1:{kind:"strength", w:"M1"},
+      1:{kind:"strength", w:rot()},
       2:{kind:"bike", title:"Rad Zone 2", dur:"90–120 min", steps:[`Gleichmäßig bei ${ftpW(60,70)}`]},
       3:{kind:"hyrox", title:"Hyrox-Session", dur:"45–60 min", steps:["Läufe + Stationen im Wechsel","2–3 Mal im März gemeinsam im Hyrox-Gym: Wechsel und Aufteilung üben"]},
       4:{kind:"bike", title:"Rad Schwelle oder Sweetspot", dur:"90 min", steps:[`4 × 10 min bei ${ftpW(95,100)} oder 2 × 20 min bei ${ftpW(88,93)}`]},
-      5:{kind:"strength", w:"M2"},
+      5:{kind:"strength", w:rot()},
       6:{kind:"bike", title:"Lange Ausfahrt", dur:"4–5 h", steps:["Möglichst draußen","Verpflegung wie im Rennen testen"]},
       0:{kind:"rest", title:"Ruhetag", dur:"", steps:["Erholung"]}
     };
@@ -304,15 +316,15 @@ function sessionBase(date) {
   // b3
   const after = diffDays(s.hyrox, date), toGo = diffDays(date, s.event);
   if (after <= 7) {
-    const easy = {1:{kind:"rest",title:"Ruhetag",dur:"",steps:["Nach Hyrox regenerieren"]},2:{kind:"bike",title:"Rad Zone 2 locker",dur:"60 min",steps:[`Locker bei ${ftpW(55,65)}`]},3:{kind:"strength",w:"M1",light:true},4:{kind:"bike",title:"Rad Zone 2",dur:"90 min",steps:[`Bei ${ftpW(60,70)}`]},5:{kind:"rest",title:"Ruhetag",dur:"",steps:["Erholung"]},6:{kind:"bike",title:"Lange Ausfahrt Zone 2",dur:"3–4 h",steps:["Ruhig, nur Zone 2"]},0:{kind:"bike",title:"Rad Zone 2",dur:"90 min",steps:["Locker"]}};
-    const x = {...easy[wd], key: "b3r-" + wd}; if (x.kind==="strength"){x.title=WORKOUTS.M1.title+" (leicht)";x.dur="45 min";x.intensity="leicht";} x.taper="Woche nach Hyrox: locker regenerieren, Rad in Zone 2."; return x;
+    const easy = {1:{kind:"rest",title:"Ruhetag",dur:"",steps:["Nach Hyrox regenerieren"]},2:{kind:"bike",title:"Rad Zone 2 locker",dur:"60 min",steps:[`Locker bei ${ftpW(55,65)}`]},3:{kind:"strength",w:rot(),light:true},4:{kind:"bike",title:"Rad Zone 2",dur:"90 min",steps:[`Bei ${ftpW(60,70)}`]},5:{kind:"rest",title:"Ruhetag",dur:"",steps:["Erholung"]},6:{kind:"bike",title:"Lange Ausfahrt Zone 2",dur:"3–4 h",steps:["Ruhig, nur Zone 2"]},0:{kind:"bike",title:"Rad Zone 2",dur:"90 min",steps:["Locker"]}};
+    const x = {...easy[wd], key: "b3r-" + wd}; if (x.kind==="strength"){x.title=WORKOUTS[x.w].title+" (leicht)";x.dur="35 min";x.intensity="halbe Sätze";} x.taper="Woche nach Hyrox: locker regenerieren, Rad in Zone 2."; return x;
   }
   if (toGo <= 10) {
     const t = {1:{kind:"bike",title:"Rad Zone 2",dur:"60 min",steps:["Locker, Beine bewegen"]},2:{kind:"bike",title:"Rad mit Tempoblöcken",dur:"60 min",steps:[`3 × 5 min bei ${ftpW(85,90)}`]},3:{kind:"rest",title:"Ruhetag",dur:"",steps:["Viel schlafen"]},4:{kind:"bike",title:"Rad Zone 2",dur:"45–60 min",steps:["Locker"]},5:{kind:"rest",title:"Ruhetag",dur:"",steps:["Ausrüstung packen"]},6:{kind:"bike",title:"Rad locker mit Tempo",dur:"90 min",steps:[`2 × 10 min bei ${ftpW(80,85)}`]},0:{kind:"bike",title:"Rad Zone 2",dur:"60 min",steps:["Locker"]}};
     const x = {...t[wd], key: "b3t-" + wd}; x.taper = "Taper: Umfang auf etwa 40 %, ein paar kurze Tempoblöcke, viel Schlaf."; return x;
   }
-  const peak = {1:{kind:"strength",w:"M1",short:true},2:{kind:"bike",title:"Rad Zone 2",dur:"90–120 min",steps:[`Gleichmäßig bei ${ftpW(60,70)}`]},3:{kind:"bike",title:"Rad Zone 2 locker",dur:"60 min",steps:["Locker"]},4:{kind:"bike",title:"Rad Tempo",dur:"90 min",steps:[`3 × 15 min bei ${ftpW(76,85)}`]},5:{kind:"rest",title:"Ruhetag",dur:"",steps:["Vor dem langen Wochenende"]},6:{kind:"bike",title:"Lange Ausfahrt",dur:"6–8 h",steps:["Spitzenumfang","Einmal als Generalprobe: Taschen, Licht, Verpflegung, Kleidung für die Nacht"]},0:{kind:"bike",title:"Back-to-back Ausfahrt",dur:"3–4 h",steps:["Nach dem langen Samstag, Zone 2"]}};
-  const x = {...peak[wd], key: "b3-" + wd}; if (x.kind==="strength"){x.title="Kraft Erhaltung (kurz)";x.dur="45 min";x.intensity="schwer, wenig Sätze";}
+  const peak = {1:{kind:"strength",w:rot()},2:{kind:"bike",title:"Rad Zone 2",dur:"90–120 min",steps:[`Gleichmäßig bei ${ftpW(60,70)}`]},3:{kind:"bike",title:"Rad Zone 2 locker",dur:"60 min",steps:["Locker"]},4:{kind:"bike",title:"Rad Tempo",dur:"90 min",steps:[`3 × 15 min bei ${ftpW(76,85)}`]},5:{kind:"rest",title:"Ruhetag",dur:"",steps:["Vor dem langen Wochenende"]},6:{kind:"bike",title:"Lange Ausfahrt",dur:"6–8 h",steps:["Spitzenumfang","Einmal als Generalprobe: Taschen, Licht, Verpflegung, Kleidung für die Nacht"]},0:{kind:"bike",title:"Back-to-back Ausfahrt",dur:"3–4 h",steps:["Nach dem langen Samstag, Zone 2"]}};
+  const x = {...peak[wd], key: "b3-" + wd}; if (x.kind==="strength"){const W=WORKOUTS[x.w];x.title=W.title;x.dur=`${W.min} min`;}
   return x;
 }
 function sessionFor(date) {
@@ -348,24 +360,56 @@ function history(id) {
   }
   return out.sort((a,b) => a.date < b.date ? -1 : 1);
 }
+// where in the strength block a date sits
+function strengthPhase(date) {
+  if (phaseOf(date).id !== "b1") return {kind:"maint", label:"Erhaltung (März/April)",
+    info:"Kraft halten: Hauptübung 3 schwere Sätze bei RPE 7–8, Zusatzübungen 2 Sätze, Kettlebell unverändert."};
+  const w = block1Week(date);
+  if (w > 16) return {kind:"deload", label:"Entlastung vor Block 2",
+    info:"Hauptübung 2 Sätze mit ca. 80 % des letzten Arbeitsgewichts, Zusatzübungen 2 Sätze bei RPE 5–6. Kettlebell-Übungen bleiben gleich."};
+  const cw = (w - 1) % 8 + 1, cyc = w > 8 ? 2 : 1, head = `Zyklus ${cyc} · Woche ${cw} von 8 · `;
+  if (cw <= 3) return {kind:"vol", label:head + "Aufbau", info:"RPE 6–7,5: 2–4 Wiederholungen bleiben im Tank. Niemals bis zum Muskelversagen, du musst am nächsten Tag laufen können."};
+  if (cw === 4) return {kind:"deload", label:head + "Entlastung", info:"Hauptübung 2 Sätze mit ca. 80 % des letzten Arbeitsgewichts, Zusatzübungen 2 Sätze bei RPE 5–6. Kettlebell-Übungen bleiben gleich."};
+  if (cw <= 7) return {kind:"str", label:head + "Grundkraft", info:"RPE 7,5–8,5: 1–2 Wiederholungen bleiben im Tank. Weiterhin nie bis zum Versagen."};
+  return {kind:"test", label:head + "Entlastung + Standortbestimmung",
+    info:"Hauptübung: nach den Aufwärmsätzen ein Satz mit 8 sauberen Wiederholungen bei RPE 9 (kein Maximalversuch). Zusatzübungen locker. Notiere außerdem: maximale Klimmzüge am Stück und die Farmers-Carry-Distanz mit 2 × 24 kg."};
+}
+// sets and rep range for an exercise on a given day
+function prescription(id, date) {
+  const e = EX[id] || {}, sp = strengthPhase(date), role = e.role || "acc";
+  const vol = {sets: e.sets, lo: e.lo, hi: e.hi}, str = e.str || vol;
+  if (sp.kind === "vol") return vol;
+  if (sp.kind === "str") return str;
+  if (role === "steady") return vol;
+  if (sp.kind === "deload") return {sets: 2, lo: vol.lo, hi: vol.hi};
+  if (sp.kind === "test") return role === "main" ? {sets: 1, lo: 8, hi: 8} : {sets: 2, lo: str.lo, hi: str.hi};
+  return role === "main" ? {sets: 3, lo: Math.min(5, str.lo), hi: Math.min(5, str.hi)} : {sets: 2, lo: str.lo, hi: str.hi};
+}
+const roundKg = (v, e) => { const st = (e.inc || 0) >= 2.5 ? 2.5 : (e.inc || 1); return Math.round(v / st) * st; };
+const topKg = h => Math.max(...h.sets.map(x => Number(x.kg)));
+function reached(h) { const p = prescription(h.eid, h.date); return h.sets.length >= p.sets && h.sets.every(x => Number(x.reps) >= p.hi); }
 function suggestion(id, date) {
-  const e = EX[id];
+  const e = EX[id], sp = strengthPhase(date);
   if (e.bodyweight) return {kg:null, text:""};
-  const h = history(id).filter(x => x.date < date);
-  if (!h.length) {
+  // working sessions only: deload weeks and the light accessory work of test weeks do not count
+  const work = history(id).filter(x => x.date < date).filter(x => { const k = strengthPhase(x.date).kind; return k !== "deload" && !(k === "test" && (EX[x.eid] || {}).role !== "main"); });
+  if (!work.length) {
     const base = EX[exKey(id)];
-    return base.start ? {kg:base.start, text:`Startgewicht ${base.start} kg (inkl. 20-kg-Stange)`} : {kg:null, text:"Erstes Mal: Gewicht wählen, bei dem 2 Wdh. im Tank bleiben"};
+    if (base.start != null) return {kg:base.start, text:`Startgewicht ${num(base.start)} kg${e.role === "main" ? " (inkl. 20-kg-Stange)" : ""}`};
+    return {kg:null, text:"Erstes Mal: ein Gewicht wählen, bei dem 2–3 Wiederholungen im Tank bleiben"};
   }
-  const last = h[h.length-1], le = EX[last.eid];
-  const top = Math.max(...last.sets.map(s => Number(s.kg)));
-  const hit = last.sets.length >= le.sets && last.sets.every(s => Number(s.reps) >= le.hi);
-  if (hit) return {kg: +(top + e.inc).toFixed(1), text:`Letztes Mal alle Sätze geschafft (${top} kg) → +${String(e.inc).replace(".",",")} kg`};
-  if (h.length >= 2) {
-    const prev = h[h.length-2], ptop = Math.max(...prev.sets.map(s => Number(s.kg)));
-    const phit = prev.sets.length >= EX[prev.eid].sets && prev.sets.every(s => Number(s.reps) >= EX[prev.eid].hi);
-    if (ptop === top && !phit) { const kg = Math.round(top*0.9/2.5)*2.5; return {kg, warn:true, text:`Zwei Einheiten ohne Fortschritt bei ${top} kg → auf ${kg} kg senken und neu aufbauen`}; }
+  const last = work[work.length - 1], top = topKg(last), lk = strengthPhase(last.date).kind;
+  if (sp.kind === "deload" && e.role !== "steady") { const kg = roundKg(top * 0.8, e); return {kg, text:`Entlastung: ca. 80 % von ${num(top)} kg`}; }
+  if (sp.kind === "test" && e.role === "main") return {kg:top, text:`8er-Test: nach den Aufwärmsätzen so weit steigern, dass 8 saubere Wdh. bei RPE 9 gehen. Zuletzt ${num(top)} kg.`};
+  if (sp.kind === "maint" && lk !== "maint") { const kg = lk === "test" ? roundKg(top * 0.9, e) : top; return {kg, text:`Erhaltung: mit ${num(kg)} kg weitermachen, RPE höchstens 8`}; }
+  if (lk === "test" && sp.kind !== "test") { const kg = roundKg(top * 0.9, e); return {kg, text:`Neuer Zyklus: ca. 90 % deines 8er-Tests (${num(top)} kg)`}; }
+  if (sp.kind === "str" && lk === "vol") { const kg = roundKg(top * 1.06, e); return {kg, text:`Grundkraft: Gewicht aus der Aufbauphase (${num(top)} kg) plus ca. 6 %`}; }
+  if (reached(last)) return {kg: +(top + e.inc).toFixed(1), text:`Letztes Mal alles geschafft (${num(top)} kg). Bei RPE ≤ 7,5 → +${num(e.inc)} kg`};
+  if (work.length >= 2) {
+    const prev = work[work.length - 2];
+    if (topKg(prev) === top && !reached(prev) && strengthPhase(prev.date).kind === lk) { const kg = roundKg(top * 0.9, e); return {kg, warn:true, text:`Zweimal die Zielwiederholungen verfehlt bei ${num(top)} kg → auf ${num(kg)} kg zurück und neu aufbauen`}; }
   }
-  return {kg: top, text:`Gewicht halten (${top} kg), bis alle Sätze ${le.hi} Wdh. schaffen`};
+  return {kg: top, text:`Gewicht halten (${num(top)} kg), bis alle Sätze sauber gehen`};
 }
 
 // ---------- storage (on this device) ----------
@@ -502,7 +546,7 @@ function renderDay() {
     <button class="iconbtn" id="prevDay" aria-label="Vorheriger Tag">‹</button>
     <div class="daytitle"><div class="d">${fmtLong(d)}</div>${d !== TODAY ? `<button class="today-link" id="toToday">Zu heute springen</button>` : `<span class="muted" style="font-size:13px">Heute · ${esc(phaseOf(d).label)}</span>`}</div>
     <button class="iconbtn" id="nextDay" aria-label="Nächster Tag">›</button></div>`;
-  if (x.deload) h += `<div class="notice">Entlastungswoche: etwa 60 % Umfang, Kraft mit halber Satzzahl.</div>`;
+  if (x.deload) h += `<div class="notice">Entlastungswoche: Ausdauer mit etwa 60 % Umfang, Kraft nach Entlastungsschema.</div>`;
   if (x.taper) h += `<div class="notice">${esc(x.taper)}</div>`;
   h += `<section class="card"><div class="session-head"><div>
       <span class="tag k-${x.kind}">${kindLabel[x.kind]}</span>
@@ -511,30 +555,33 @@ function renderDay() {
       ${x.kind !== "rest" ? `<button class="donebtn" id="doneBtn" aria-pressed="${done}">${done ? "✓ Erledigt" : "Erledigt"}</button>` : ""}
     </div>`;
   if (x.kind === "strength") {
-    const W = WORKOUTS[x.w];
+    const W = WORKOUTS[x.w], sp = strengthPhase(d);
+    h += `<div class="phasebox"><b>${esc(sp.label)}</b><span>${esc(sp.info)}</span></div>
+      <details class="warm"><summary>Aufwärmen, 6–8 min</summary><ol class="steps">${WARMUP.map(t => `<li>${esc(t)}</li>`).join("")}</ol></details>`;
     h += `<div style="margin-top:14px">`;
     W.ex.forEach(id => {
-      const e = EX[id], sug = suggestion(id, d);
-      let nSets = x.deload || x.light ? Math.ceil(e.sets/2) : e.sets;
+      const e = EX[id], sug = suggestion(id, d), pr = prescription(id, d);
+      const nSets = x.light ? Math.ceil(pr.sets / 2) : pr.sets;
       const sets = (rec.log && rec.log[id]) || [];
       const unit = e.unit || "Wdh.";
-      const target = `${nSets} × ${e.lo === e.hi ? e.lo : e.lo + "–" + e.hi} ${e.unit ? e.unit : ""}${e.per ? " " + e.per : ""}`.trim();
-      h += `<div class="ex"><div class="ex-head"><span class="ex-name">${esc(e.name)}</span><span class="ex-target num">${esc(target)}</span></div>`;
+      const target = `${nSets} × ${pr.lo === pr.hi ? pr.lo : pr.lo + "–" + pr.hi} ${e.unit ? e.unit : ""}${e.per ? " " + e.per : ""}`.trim();
+      h += `<div class="ex"><div class="ex-head"><span class="ex-name">${esc(e.name)}</span><span class="ex-target num">${esc(target)}${e.pause ? " · " + esc(e.pause) : ""}</span></div>`;
       if (sug.text) h += `<div class="hint${sug.warn ? " warn" : ""}">${esc(sug.text)}</div>`;
+      if (e.tip) h += `<div class="tip">${esc(e.tip)}</div>`;
       h += `<div class="sets"><span class="h">Satz</span><span class="h">${e.bodyweight ? "Zusatz-kg" : "kg"}</span><span class="h">${unit === "Wdh." ? "Wdh." : esc(unit)}</span><span></span>`;
       for (let i = 0; i < nSets; i++) {
         const s = sets[i] || {}, on = s.kg !== undefined && s.reps !== undefined && s.reps !== "";
         const kgPh = sug.kg != null ? num(sug.kg) : (e.bodyweight ? "–" : "kg");
         h += `<span class="n">${i+1}</span>
           <input inputmode="decimal" id="kg-${id}-${i}" data-ex="${id}" data-i="${i}" data-f="kg" value="${s.kg != null ? esc(num(s.kg)) : ""}" placeholder="${kgPh}" aria-label="${esc(e.name)} Satz ${i+1} Gewicht">
-          <input inputmode="numeric" id="rp-${id}-${i}" data-ex="${id}" data-i="${i}" data-f="reps" value="${s.reps != null ? esc(s.reps) : ""}" placeholder="${e.hi}" aria-label="${esc(e.name)} Satz ${i+1} Wiederholungen">
+          <input inputmode="numeric" id="rp-${id}-${i}" data-ex="${id}" data-i="${i}" data-f="reps" value="${s.reps != null ? esc(s.reps) : ""}" placeholder="${pr.hi}" aria-label="${esc(e.name)} Satz ${i+1} Wiederholungen">
           <button class="setchk" data-chk="${id}" data-i="${i}" aria-pressed="${on}" aria-label="Satz ${i+1} abhaken">✓</button>`;
       }
       h += `</div></div>`;
     });
     h += `</div>`;
     if (x.extra) h += `<p class="muted" style="margin:14px 0 0">${esc(x.extra)}</p>`;
-    h += `<p class="muted" style="font-size:13px;margin:12px 0 0">Erste 4 Wochen 2 Wdh. im Tank lassen, danach bis 1 Wdh. vor dem Versagen. Haken übernimmt den Vorschlag, wenn ein Feld leer ist.</p>`;
+    h += `<p class="muted" style="font-size:13px;margin:12px 0 0">Der Haken übernimmt Vorschlag und Zielwiederholungen, wenn ein Feld leer ist. Bei Schmerzen im unteren Rücken oder in den Knien (nicht Muskelkater): Einheit abbrechen.</p>`;
   } else {
     h += `<ul class="steps">${(x.steps||[]).map(s => `<li>${esc(s)}</li>`).join("")}</ul>`;
     if (x.note) h += `<p class="muted" style="font-size:13px;margin:8px 0 0">${esc(x.note)}</p>`;
@@ -568,7 +615,7 @@ function renderDay() {
     else {
       const sug = suggestion(id, d);
       if (s.kg === undefined) s.kg = sug.kg != null ? sug.kg : 0;
-      if (s.reps === undefined) s.reps = e.hi;
+      if (s.reps === undefined) s.reps = prescription(id, d).hi;
     }
     persist("sessions/"+d, r, true); renderDay();
   });
@@ -646,7 +693,7 @@ function renderPlan() {
     <h2>Ziele</h2>
     <ul class="plain">
       <li><b>1 · Heading East</b>, 600 km Ende April: Radausdauer, lange Fahrten, Verpflegung, Sitzfleisch.</li>
-      <li><b>2 · Kraft und Muskelaufbau</b>, Nov–Feb: 3 Krafteinheiten pro Woche, schwere Grundübungen.</li>
+      <li><b>2 · Kraft und Muskelaufbau</b>, Nov–Feb: 3 Ganzkörper-Einheiten à 45 min (A Kniebeuge, B Bankdrücken, C Kreuzheben) im 8-Wochen-Zyklus, zweimal hintereinander.</li>
       <li><b>3 · Hyrox Madrid Doubles</b>, Ende März, mit dem Bruder.</li>
       <li><b>Laufend · Körperfett senken</b>: leichtes Defizit, viel Protein, Kraft bleibt Pflicht.</li>
     </ul>
@@ -890,11 +937,23 @@ function renderEditWorkout(id) {
         <button class="iconbtn sm" data-mv="1" data-i="${i}" aria-label="Nach unten"${i === w.ex.length - 1 ? " disabled" : ""}>↓</button>
         <button class="iconbtn sm" data-rm="${i}" aria-label="Übung entfernen">✕</button></span></div>
       <label class="field">Übung<input data-f="name" value="${esc(e.name)}"></label>
+      <div class="eyebrow">Wochen 1–3 · Aufbau</div>
       <div class="grid3">
         <label class="field">Sätze<input data-f="sets" inputmode="numeric" value="${e.sets}"></label>
         <label class="field">${e.unit ? "Ziel von" : "Wdh. von"}<input data-f="lo" inputmode="numeric" value="${e.lo}"></label>
         <label class="field">bis<input data-f="hi" inputmode="numeric" value="${e.hi}"></label>
       </div>
+      <div class="eyebrow">Wochen 5–7 · Grundkraft</div>
+      <div class="grid3">
+        <label class="field">Sätze<input data-f="str.sets" inputmode="numeric" value="${(e.str || e).sets}"></label>
+        <label class="field">${e.unit ? "Ziel von" : "Wdh. von"}<input data-f="str.lo" inputmode="numeric" value="${(e.str || e).lo}"></label>
+        <label class="field">bis<input data-f="str.hi" inputmode="numeric" value="${(e.str || e).hi}"></label>
+      </div>
+      <div class="grid2">
+        <label class="field">Art<select data-f="role">${[["main","Hauptübung"],["acc","Zusatzübung"],["steady","Kettlebell / Carry"]].map(([v, l]) => `<option value="${v}"${(e.role || "acc") === v ? " selected" : ""}>${l}</option>`).join("")}</select></label>
+        <label class="field">Pause<input data-f="pause" value="${esc(e.pause || "")}" placeholder="z. B. 90 s"></label>
+      </div>
+      <label class="field">Zusatz zur Wiederholungszahl<input data-f="per" value="${esc(e.per || "")}" placeholder="z. B. pro Seite"></label>
       <div class="grid3">
         <label class="field">Einheit<select data-f="unit">${UNITS.map(([v, l]) => `<option value="${v}"${(e.unit || "") === v ? " selected" : ""}>${l}</option>`).join("")}</select></label>
         <label class="field">Steigerung kg<input data-f="inc" inputmode="decimal" value="${e.bodyweight ? "" : num(e.inc ?? 2.5)}" ${e.bodyweight ? "disabled" : ""}></label>
@@ -921,6 +980,15 @@ function renderEditWorkout(id) {
     card.querySelectorAll("[data-f]").forEach(inp => inp.addEventListener(inp.type === "checkbox" || inp.tagName === "SELECT" ? "change" : "input", () => {
       const f = inp.dataset.f, raw = inp.value.trim().replace(",", ".");
       if (f === "name") { if (raw) saveEx(eid, {name: inp.value.trim()}); return; }
+      if (f === "role") { saveEx(eid, {role: raw}); return; }
+      if (f === "pause" || f === "per") { saveEx(eid, {[f]: inp.value.trim() || null}); return; }
+      if (f.startsWith("str.")) {
+        const v = Math.round(Number(raw)); if (!(v > 0) || v > 1000) return;
+        const k = f.slice(4), cur = {...(EX[eid].str || {sets: EX[eid].sets, lo: EX[eid].lo, hi: EX[eid].hi}), [k]: v};
+        if (k === "lo" && cur.hi < cur.lo) cur.hi = cur.lo;
+        if (k === "hi" && cur.hi < cur.lo) return;
+        saveEx(eid, {str: cur}); return;
+      }
       if (f === "unit") { saveEx(eid, {unit: raw || null}); return rerender(); }
       if (f === "bodyweight") { saveEx(eid, {bodyweight: inp.checked}); return rerender(); }
       if (f === "start") { if (raw !== "" && !(Number(raw) >= 0)) return; saveEx(eid, {start: raw === "" ? null : Number(raw)}); return; }
@@ -946,7 +1014,7 @@ function renderEditWorkout(id) {
   });
   document.getElementById("addNew").onclick = () => {
     const eid = "x_" + Date.now().toString(36);
-    cust().ex[eid] = {name: "Neue Übung", sets: 3, lo: 8, hi: 12, inc: 2.5};
+    cust().ex[eid] = {name: "Neue Übung", role: "acc", sets: 3, lo: 8, hi: 10, str: {sets: 3, lo: 6, hi: 8}, inc: 2.5, pause: "90 s"};
     saveWorkout(id, {ex: [...WORKOUTS[id].ex, eid]}); rerender();
     const inp = $view.querySelector(`.exedit[data-eid="${eid}"] [data-f="name"]`); if (inp) { inp.scrollIntoView({block:"center"}); inp.select(); }
   };
