@@ -887,9 +887,10 @@ const UNITS = [["", "Wdh."], ["s", "Sekunden"], ["m", "Meter"], ["Schritte", "Sc
 const SLOT_GROUPS = {b1:"Block 1 · Nov–Feb", "b1f":"Block 1 · Februar", b2:"Block 2 · März", b3r:"Block 3 · Woche nach Hyrox", b3:"Block 3 · Spitzenwochen", b3t:"Block 3 · Taper"};
 const WD_NAMES = ["Sonntag","Montag","Dienstag","Mittwoch","Donnerstag","Freitag","Samstag"];
 function cust() { const c = state.custom; c.ex = c.ex || {}; c.workouts = c.workouts || {}; c.sessions = c.sessions || {}; c.days = c.days || {}; return c; }
+// stores only the fields you changed, so later updates of the base plan still reach everything else
 function saveWorkout(id, patch) {
-  const c = cust(), cur = WORKOUTS[id];
-  c.workouts[id] = {title: cur.title, min: cur.min, int: cur.int, ex: [...cur.ex], ...(c.workouts[id] || {}), ...patch};
+  const c = cust();
+  c.workouts[id] = {...(c.workouts[id] || {}), ...patch};
   persist("custom/main");
 }
 function saveEx(id, patch) { const c = cust(); c.ex[id] = {...(c.ex[id] || {}), ...patch}; persist("custom/main"); }
