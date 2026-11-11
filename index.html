@@ -324,8 +324,109 @@ const LS = "trainingsplan-v1";
 let storageOk = true;
 function lsLoad(){ try { const j = JSON.parse(localStorage.getItem(LS) || "{}"); Object.assign(state.settings, j.settings||{}); state.sessions = j.sessions||{}; state.weights = j.weights||{}; } catch(e){ storageOk = false; } }
 function lsSave(){ try { localStorage.setItem(LS, JSON.stringify({version:1, settings:state.settings, sessions:state.sessions, weights:state.weights})); storageOk = true; } catch(e){ storageOk = false; } setSync(); }
-function persist() { lsSave(); }
-function setSync(){ const el = document.getElementById("sync"); el.textContent = storageOk ? "Daten liegen auf diesem Gerät. Unter Plan → Backup kannst du sie sichern." : "Speichern nicht möglich (privater Modus?). Einträge gehen beim Schließen verloren."; }
+// every change stamps the record with `u` (ms) so two devices can be merged record by record
+function persist(path) {
+  const now = Date.now(), [col, id] = (path || "").split("/");
+  if (col === "sessions" && state.sessions[id]) state.sessions[id].u = now;
+  if (col === "weights") state.weights[id] = state.weights[id] && state.weights[id].kg ? {...state.weights[id], u: now} : {date: id, deleted: true, u: now};
+  if (col === "settings") state.settings.u = now;
+  lsSave(); Sync.schedule();
+}
+function setSync(){
+  const el = document.getElementById("sync");
+  if (!storageOk) { el.textContent = "Speichern nicht möglich (privater Modus?). Einträge gehen beim Schließen verloren."; return; }
+  el.textContent = Sync.on() ? Sync.statusText() : "Daten liegen nur auf diesem Gerät. Unter Plan → Geräte-Sync kannst du den Abgleich einschalten.";
+}
+
+// ---------- sync across devices via a private GitHub Gist ----------
+const Sync = (() => {
+  const KEY = "trainingsplan-sync", FILE = "trainingsplan-data.json", DESC = "trainingsplan-sync (Trainingsplan App)";
+  let cfg = {}; try { cfg = JSON.parse(localStorage.getItem(KEY) || "{}"); } catch(e){}
+  let timer = null, busy = false, again = false, status = "idle", lastErr = "";
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(cfg)); } catch(e){} };
+  const api = async (path, opts = {}) => {
+    const r = await fetch("https://api.github.com" + path, {...opts, headers: {"Accept":"application/vnd.github+json", "Authorization":"Bearer " + cfg.token, ...(opts.body ? {"Content-Type":"application/json"} : {})}});
+    if (r.status === 401) throw new Error("auth");
+    if (r.status === 404) throw new Error("notfound");
+    if (!r.ok) throw new Error("http" + r.status);
+    return r.json();
+  };
+  const pickNewer = (a, b) => (!a ? b : !b ? a : ((b.u || 0) > (a.u || 0) ? b : a));
+  function merge(local, remote) {
+    const out = {settings: pickNewer(local.settings, remote.settings) || {}, sessions: {}, weights: {}};
+    for (const k of ["sessions", "weights"]) {
+      const keys = new Set([...Object.keys(local[k] || {}), ...Object.keys(remote[k] || {})]);
+      keys.forEach(id => { out[k][id] = pickNewer((local[k] || {})[id], (remote[k] || {})[id]); });
+    }
+    return out;
+  }
+  async function findGist() {
+    for (let page = 1; page <= 5; page++) {
+      const list = await api(`/gists?per_page=100&page=${page}`);
+      const hit = list.find(g => g.description === DESC && g.files && g.files[FILE]);
+      if (hit) return hit.id;
+      if (list.length < 100) break;
+    }
+    return null;
+  }
+  async function readRemote() {
+    const g = await api("/gists/" + cfg.gist);
+    const f = g.files && g.files[FILE]; if (!f) return {};
+    let text = f.content;
+    if (f.truncated) text = await (await fetch(f.raw_url)).text();
+    try { return JSON.parse(text || "{}"); } catch(e) { return {}; }
+  }
+  const snapshot = () => ({app:"trainingsplan", version:1, settings:state.settings, sessions:state.sessions, weights:state.weights});
+  async function run() {
+    if (!cfg.token) return;
+    if (busy) { again = true; return; }
+    if (!navigator.onLine) { status = "offline"; setSync(); return; }
+    busy = true; status = "syncing"; setSync();
+    try {
+      if (!cfg.gist) {
+        cfg.gist = await findGist();
+        if (!cfg.gist) {
+          const g = await api("/gists", {method:"POST", body: JSON.stringify({description: DESC, public: false, files: {[FILE]: {content: JSON.stringify(snapshot())}}})});
+          cfg.gist = g.id;
+        }
+        save();
+      }
+      const remote = await readRemote();
+      const merged = merge(snapshot(), remote);
+      const mergedText = JSON.stringify({app:"trainingsplan", version:1, ...merged});
+      const remoteText = JSON.stringify({app:"trainingsplan", version:1, settings: remote.settings || {}, sessions: remote.sessions || {}, weights: remote.weights || {}});
+      const localChanged = JSON.stringify(merged) !== JSON.stringify({settings:state.settings, sessions:state.sessions, weights:state.weights});
+      // keep any field the person is typing into right now: re-stamped records win next round
+      state.settings = {...DEFAULTS, ...merged.settings}; state.sessions = merged.sessions; state.weights = merged.weights;
+      lsSave();
+      if (mergedText !== remoteText) await api("/gists/" + cfg.gist, {method:"PATCH", body: JSON.stringify({files: {[FILE]: {content: mergedText}}})});
+      cfg.last = Date.now(); save(); status = "ok"; lastErr = "";
+      if (localChanged) { const a = document.activeElement; if (!(a && /INPUT|TEXTAREA/.test(a.tagName))) render(); }
+    } catch (e) {
+      status = "error";
+      lastErr = e.message === "auth" ? "Token ungültig oder abgelaufen. Unter Plan → Geräte-Sync neu eintragen."
+        : e.message === "notfound" ? (cfg.gist = null, save(), "Sync-Speicher nicht gefunden, wird beim nächsten Mal neu gesucht.")
+        : "Abgleich fehlgeschlagen. Neuer Versuch beim nächsten Öffnen.";
+    } finally {
+      busy = false; setSync();
+      if (again) { again = false; schedule(500); }
+    }
+  }
+  function schedule(ms = 2500) { if (!cfg.token) return; clearTimeout(timer); timer = setTimeout(run, ms); }
+  function statusText() {
+    if (status === "syncing") return "Gleicht ab …";
+    if (status === "offline") return "Offline. Einträge werden abgeglichen, sobald wieder Internet da ist.";
+    if (status === "error") return lastErr;
+    if (cfg.last) { const d = new Date(cfg.last); return `Abgeglichen um ${pad(d.getHours())}:${pad(d.getMinutes())} · auf allen Geräten verfügbar`; }
+    return "Geräte-Sync ist an.";
+  }
+  return {
+    on: () => !!cfg.token, run, schedule, statusText, merge,
+    connect(token) { cfg = {token: token.trim()}; save(); return run().then(() => status); },
+    disconnect() { cfg = {}; save(); status = "idle"; setSync(); },
+    info: () => ({gist: cfg.gist, last: cfg.last, status, lastErr}),
+  };
+})();
 
 // ---------- rendering ----------
 const $view = document.getElementById("view");
@@ -524,6 +625,23 @@ function renderPlan() {
       <label class="field">FTP (Watt)<input type="number" inputmode="numeric" id="set-ftp" value="${s.ftp ?? ""}" placeholder="nach dem FTP-Test"></label>
     </div>
   </section>
+  <section class="card stack" id="syncCard">
+    <h2>Geräte-Sync</h2>
+    ${Sync.on() ? `
+      <p style="margin:0">Der Abgleich ist an. Einträge erscheinen auf jedem Gerät, auf dem du denselben Token eingetragen hast, spätestens beim nächsten Öffnen.</p>
+      <p class="muted" style="margin:0;font-size:13px" id="syncInfo">${esc(Sync.statusText())}</p>
+      <div class="row" style="flex-wrap:wrap"><button class="btn" id="syncNow">Jetzt abgleichen</button><button class="btn ghost" id="syncOff">Auf diesem Gerät ausschalten</button></div>`
+    : `
+      <p style="margin:0">Deine Einträge werden in einem privaten Gist in deinem GitHub-Konto gespeichert und zwischen deinen Geräten abgeglichen.</p>
+      <ol class="steps" style="font-size:14px">
+        <li>Auf GitHub einen Token mit nur dem Recht <b>gist</b> erstellen: <a href="https://github.com/settings/tokens/new?scopes=gist&description=Trainingsplan%20App" target="_blank" rel="noopener">Token erstellen</a>. Ablaufdatum: „No expiration“ oder 1 Jahr.</li>
+        <li>Den Token hier einfügen und verbinden.</li>
+        <li>Auf jedem weiteren Gerät denselben Token eintragen. Die App findet den Speicher dann automatisch.</li>
+      </ol>
+      <label class="field">GitHub-Token<input type="password" id="syncToken" autocomplete="off" placeholder="ghp_…"></label>
+      <div class="row"><button class="btn" id="syncConnect">Verbinden</button></div>`}
+    <p id="syncMsg" class="muted" style="margin:0;font-size:13px" aria-live="polite"></p>
+  </section>
   <section class="card stack">
     <h2>Backup</h2>
     <p class="muted" style="margin:0;font-size:13px">Alle Einträge liegen nur auf diesem Gerät. Sichere sie ab und zu als Datei, zum Beispiel in iCloud Drive. Mit der Datei kannst du sie auch auf ein anderes Gerät übertragen.</p>
@@ -533,6 +651,19 @@ function renderPlan() {
     </div>
     <p id="backupMsg" class="muted" style="margin:0;font-size:13px" aria-live="polite"></p>
   </section>`;
+  const conn = document.getElementById("syncConnect");
+  if (conn) conn.onclick = async () => {
+    const t = document.getElementById("syncToken").value.trim(), msg = document.getElementById("syncMsg");
+    if (!/^(ghp_|github_pat_|gho_)/.test(t)) { msg.textContent = "Das sieht nicht wie ein GitHub-Token aus. Er beginnt mit „ghp_“."; return; }
+    conn.disabled = true; msg.textContent = "Verbinde …";
+    const st = await Sync.connect(t);
+    if (st === "ok") { render(); document.getElementById("syncMsg").textContent = "Verbunden. Deine Einträge sind jetzt in deinem GitHub-Konto gesichert."; }
+    else { const i = Sync.info(); Sync.disconnect(); conn.disabled = false; msg.textContent = i.lastErr.startsWith("Token") ? "GitHub hat den Token abgelehnt. Prüfe, ob das Recht „gist“ angehakt ist." : "Verbindung fehlgeschlagen. Bist du online?"; }
+  };
+  const now_ = document.getElementById("syncNow");
+  if (now_) now_.onclick = async () => { now_.disabled = true; await Sync.run(); now_.disabled = false; const i = document.getElementById("syncInfo"); if (i) i.textContent = Sync.statusText(); };
+  const off = document.getElementById("syncOff");
+  if (off) off.onclick = () => { Sync.disconnect(); render(); document.getElementById("syncMsg").textContent = "Abgleich auf diesem Gerät ausgeschaltet. Deine Daten bleiben hier und im Gist erhalten."; };
   document.getElementById("exportBtn").onclick = () => {
     const blob = new Blob([JSON.stringify({app:"trainingsplan", version:1, exported:new Date().toISOString(), settings:state.settings, sessions:state.sessions, weights:state.weights}, null, 1)], {type:"application/json"});
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `trainingsplan-backup-${TODAY}.json`;
@@ -633,6 +764,9 @@ document.querySelectorAll("nav.tabs button").forEach(b => b.onclick = () => setT
 
 // ---------- boot ----------
 lsLoad(); render(); setSync();
+Sync.schedule(300);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") Sync.schedule(300); else Sync.run(); });
+window.addEventListener("online", () => Sync.schedule(300));
 try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch(e){}
 if ("serviceWorker" in navigator && location.protocol !== "file:") {
   window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
