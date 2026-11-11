@@ -120,6 +120,16 @@ ul.plain li{margin-bottom:5px}
 table.list{width:100%;border-collapse:collapse;font-size:14px}
 table.list td{padding:6px 0;border-bottom:1px solid var(--line)}
 table.list td:last-child{text-align:right}
+.editlist{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.editrow{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px;background:var(--surface);border:0;border-top:1px solid var(--line);text-align:left;width:100%}
+.editrow:first-child{border-top:0}
+.editrow .tag{margin-right:4px}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.iconbtn.sm{width:36px;height:36px;font-size:15px}
+.iconbtn:disabled{opacity:.35;cursor:default}
+label.field select{height:40px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;padding:0 8px;font-size:16px;min-width:0}
+input[type="checkbox"]{width:20px;height:20px;accent-color:var(--accent)}
 .del{background:none;border:0;color:var(--muted);padding:4px 8px}
 /* tabbar */
 nav.tabs{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px);padding-left:max(8px,env(safe-area-inset-left,0px));padding-right:max(8px,env(safe-area-inset-right,0px));z-index:20}
@@ -160,7 +170,7 @@ nav.tabs button[aria-current="page"]{color:var(--accent)}
 const DEFAULTS = { start: "2026-11-02", block1End: "2027-02-28", hyrox: "2027-03-27", event: "2027-04-30", ftp: null };
 
 // exercise: id, name, sets, lo, hi, unit ('kg'|'s'|'m'|'steps'), inc, start
-const EX = {
+const EX_BASE = {
   squat:   {name:"Kniebeuge", sets:4, lo:6, hi:8, inc:5, start:40},
   rdl:     {name:"Rumänisches Kreuzheben", sets:3, lo:8, hi:10, inc:5},
   bss:     {name:"Bulgarian Split Squat", sets:3, lo:10, hi:10, inc:2.5, per:"pro Seite"},
@@ -184,7 +194,7 @@ const EX = {
   ohpM:    {name:"Kurzhantel-Schulterdrücken", sets:3, lo:8, hi:10, inc:2, link:"ohp"},
   pullM:   {name:"Klimmzüge oder Latzug", sets:3, lo:6, hi:8, inc:2.5, link:"pull"},
 };
-const WORKOUTS = {
+const WORKOUTS_BASE = {
   A: {title:"Kraft A – Unterkörper", ex:["squat","rdl","bss","legcurl","plank"], min:75, int:"schwer"},
   B: {title:"Kraft B – Oberkörper", ex:["bench","pull","ohp","row","face"], min:75, int:"mittel"},
   C: {title:"Kraft C – Ganzkörper", ex:["dead","incline","goblet","farmer","lunge"], min:75, int:"mittel–schwer"},
@@ -208,8 +218,30 @@ const TODAY = iso(new Date());
 // ---------- state ----------
 const state = {
   tab: "day", date: TODAY, weekStart: mondayOf(TODAY),
-  settings: {...DEFAULTS}, sessions: {}, weights: {}, source: "local"
+  settings: {...DEFAULTS}, sessions: {}, weights: {}, custom: {}, source: "local", edit: null
 };
+
+// ---------- your own changes to the plan (state.custom) ----------
+// custom.ex[id]       = fields overriding an exercise (or a new exercise "x_…")
+// custom.workouts[id] = {title, min, int, ex:[ids]} overriding a strength session
+// custom.sessions[key]= {kind, title, dur, steps} overriding an endurance slot (key = block + weekday)
+const EX = {}, WORKOUTS = {};
+function applyCustom() {
+  const c = state.custom || {};
+  for (const k in EX) delete EX[k];
+  for (const k in WORKOUTS) delete WORKOUTS[k];
+  for (const [id, e] of Object.entries(EX_BASE)) EX[id] = {...e};
+  for (const [id, e] of Object.entries(c.ex || {})) {
+    const m = {...(EX_BASE[id] || {}), ...e};
+    for (const k in m) if (m[k] === null) delete m[k];   // null = field cleared by you
+    EX[id] = m;
+  }
+  for (const [id, w] of Object.entries(WORKOUTS_BASE)) {
+    const o = (c.workouts || {})[id] || {};
+    WORKOUTS[id] = {...w, ...o, ex: (o.ex || w.ex).filter(x => EX[x])};
+  }
+}
+applyCustom();
 
 // ---------- schedule ----------
 function phaseOf(date) {
@@ -227,7 +259,7 @@ function ftpW(lo, hi) {
   return `${lo}–${hi} % FTP (${Math.round(f*lo/100)}–${Math.round(f*hi/100)} W)`;
 }
 
-function sessionFor(date) {
+function sessionBase(date) {
   const s = state.settings, ph = phaseOf(date).id, wd = parse(date).getDay();
   if (date === s.hyrox) return {kind:"hyrox", title:"Hyrox Madrid Doubles", dur:"Wettkampf", steps:["Gemeinsam 8 × 1 km laufen, Stationen aufteilen.","Du: SkiErg, Rudern, Wall Balls. Bruder: Sled Push, Sled Pull, Sandbag Lunges.","Tempo beim Laufen bestimmt dein Bruder."]};
   if (date === s.event) return {kind:"bike", title:"Heading East · 600 km", dur:"Start", steps:["Verpflegung wie geübt: 60–90 g Kohlenhydrate pro Stunde.","Ruhig anfahren, Zone 2 halten."]};
@@ -248,7 +280,7 @@ function sessionFor(date) {
       0: feb ? {kind:"hyrox", title:"Hyrox-Stationen", dur:"30–40 min", steps:["Kurze Station-Session statt Sonntagslauf","SkiErg-Ersatz (Straight-Arm-Pulldown + Burpees), Rudern, Wall Balls, Farmers Carry"]}
              : {kind:"run", title:"Lauf locker oder Ruhetag", dur:"45–60 min", steps:["Locker laufen oder frei nehmen. Mindestens ein kompletter Ruhetag pro Woche."]}
     };
-    const x = {...map[wd]};
+    const x = {...map[wd], key: wd === 0 && feb ? "b1-0f" : "b1-" + wd};
     if (x.kind === "strength") { const W = WORKOUTS[x.w]; x.title = W.title; x.dur = `${W.min} min${x.extra ? " + 25 min" : ""}`; x.intensity = W.int; }
     if (deload) x.deload = true;
     return x;
@@ -264,7 +296,7 @@ function sessionFor(date) {
       6:{kind:"bike", title:"Lange Ausfahrt", dur:"4–5 h", steps:["Möglichst draußen","Verpflegung wie im Rennen testen"]},
       0:{kind:"rest", title:"Ruhetag", dur:"", steps:["Erholung"]}
     };
-    const x = {...map[wd]};
+    const x = {...map[wd], key: "b2-" + wd};
     if (x.kind === "strength") { const W = WORKOUTS[x.w]; x.title = W.title; x.dur = `${W.min} min`; x.intensity = W.int; }
     if (taper) x.taper = "Hyrox-Woche: Umfang halbieren, Kraft nur leicht, zwei kurze Einheiten mit Intensität.";
     return x;
@@ -273,15 +305,32 @@ function sessionFor(date) {
   const after = diffDays(s.hyrox, date), toGo = diffDays(date, s.event);
   if (after <= 7) {
     const easy = {1:{kind:"rest",title:"Ruhetag",dur:"",steps:["Nach Hyrox regenerieren"]},2:{kind:"bike",title:"Rad Zone 2 locker",dur:"60 min",steps:[`Locker bei ${ftpW(55,65)}`]},3:{kind:"strength",w:"M1",light:true},4:{kind:"bike",title:"Rad Zone 2",dur:"90 min",steps:[`Bei ${ftpW(60,70)}`]},5:{kind:"rest",title:"Ruhetag",dur:"",steps:["Erholung"]},6:{kind:"bike",title:"Lange Ausfahrt Zone 2",dur:"3–4 h",steps:["Ruhig, nur Zone 2"]},0:{kind:"bike",title:"Rad Zone 2",dur:"90 min",steps:["Locker"]}};
-    const x = {...easy[wd]}; if (x.kind==="strength"){x.title=WORKOUTS.M1.title+" (leicht)";x.dur="45 min";x.intensity="leicht";} x.taper="Woche nach Hyrox: locker regenerieren, Rad in Zone 2."; return x;
+    const x = {...easy[wd], key: "b3r-" + wd}; if (x.kind==="strength"){x.title=WORKOUTS.M1.title+" (leicht)";x.dur="45 min";x.intensity="leicht";} x.taper="Woche nach Hyrox: locker regenerieren, Rad in Zone 2."; return x;
   }
   if (toGo <= 10) {
     const t = {1:{kind:"bike",title:"Rad Zone 2",dur:"60 min",steps:["Locker, Beine bewegen"]},2:{kind:"bike",title:"Rad mit Tempoblöcken",dur:"60 min",steps:[`3 × 5 min bei ${ftpW(85,90)}`]},3:{kind:"rest",title:"Ruhetag",dur:"",steps:["Viel schlafen"]},4:{kind:"bike",title:"Rad Zone 2",dur:"45–60 min",steps:["Locker"]},5:{kind:"rest",title:"Ruhetag",dur:"",steps:["Ausrüstung packen"]},6:{kind:"bike",title:"Rad locker mit Tempo",dur:"90 min",steps:[`2 × 10 min bei ${ftpW(80,85)}`]},0:{kind:"bike",title:"Rad Zone 2",dur:"60 min",steps:["Locker"]}};
-    const x = {...t[wd]}; x.taper = "Taper: Umfang auf etwa 40 %, ein paar kurze Tempoblöcke, viel Schlaf."; return x;
+    const x = {...t[wd], key: "b3t-" + wd}; x.taper = "Taper: Umfang auf etwa 40 %, ein paar kurze Tempoblöcke, viel Schlaf."; return x;
   }
   const peak = {1:{kind:"strength",w:"M1",short:true},2:{kind:"bike",title:"Rad Zone 2",dur:"90–120 min",steps:[`Gleichmäßig bei ${ftpW(60,70)}`]},3:{kind:"bike",title:"Rad Zone 2 locker",dur:"60 min",steps:["Locker"]},4:{kind:"bike",title:"Rad Tempo",dur:"90 min",steps:[`3 × 15 min bei ${ftpW(76,85)}`]},5:{kind:"rest",title:"Ruhetag",dur:"",steps:["Vor dem langen Wochenende"]},6:{kind:"bike",title:"Lange Ausfahrt",dur:"6–8 h",steps:["Spitzenumfang","Einmal als Generalprobe: Taschen, Licht, Verpflegung, Kleidung für die Nacht"]},0:{kind:"bike",title:"Back-to-back Ausfahrt",dur:"3–4 h",steps:["Nach dem langen Samstag, Zone 2"]}};
-  const x = {...peak[wd]}; if (x.kind==="strength"){x.title="Kraft Erhaltung (kurz)";x.dur="45 min";x.intensity="schwer, wenig Sätze";}
+  const x = {...peak[wd], key: "b3-" + wd}; if (x.kind==="strength"){x.title="Kraft Erhaltung (kurz)";x.dur="45 min";x.intensity="schwer, wenig Sätze";}
   return x;
+}
+function sessionFor(date) {
+  const x = sessionBase(date), o = x.key && x.kind !== "strength" && ((state.custom || {}).sessions || {})[x.key];
+  if (!o) return x;
+  return {...x, ...o, steps: o.steps && o.steps.length ? o.steps : x.steps, note: o.steps ? "" : x.note, edited: true};
+}
+// every editable endurance slot, with the first date it occurs (for showing its default)
+function enduranceSlots() {
+  const s = state.settings, out = [], seen = new Set();
+  for (let d = s.start; d < s.event; d = addDays(d, 1)) {
+    if (d === s.hyrox) continue;
+    const x = sessionBase(d);
+    if (!x.key || x.kind === "strength" || seen.has(x.key)) continue;
+    seen.add(x.key); out.push({key: x.key, date: d, base: x});
+  }
+  const order = {b1:0, b2:1, b3r:2, b3:3, b3t:4};
+  return out.sort((a, b) => { const pa = a.key.split("-")[0], pb = b.key.split("-")[0]; if (pa !== pb) return order[pa] - order[pb]; const wa = (parseInt(a.key.split("-")[1]) + 6) % 7, wb = (parseInt(b.key.split("-")[1]) + 6) % 7; return wa - wb || a.key.localeCompare(b.key); });
 }
 
 // ---------- progression ----------
@@ -322,14 +371,15 @@ function suggestion(id, date) {
 // ---------- storage (on this device) ----------
 const LS = "trainingsplan-v1";
 let storageOk = true;
-function lsLoad(){ try { const j = JSON.parse(localStorage.getItem(LS) || "{}"); Object.assign(state.settings, j.settings||{}); state.sessions = j.sessions||{}; state.weights = j.weights||{}; } catch(e){ storageOk = false; } }
-function lsSave(){ try { localStorage.setItem(LS, JSON.stringify({version:1, settings:state.settings, sessions:state.sessions, weights:state.weights})); storageOk = true; } catch(e){ storageOk = false; } setSync(); }
+function lsLoad(){ try { const j = JSON.parse(localStorage.getItem(LS) || "{}"); Object.assign(state.settings, j.settings||{}); state.sessions = j.sessions||{}; state.weights = j.weights||{}; state.custom = j.custom||{}; applyCustom(); } catch(e){ storageOk = false; } }
+function lsSave(){ try { localStorage.setItem(LS, JSON.stringify({version:1, settings:state.settings, sessions:state.sessions, weights:state.weights, custom:state.custom})); storageOk = true; } catch(e){ storageOk = false; } setSync(); }
 // every change stamps the record with `u` (ms) so two devices can be merged record by record
 function persist(path) {
   const now = Date.now(), [col, id] = (path || "").split("/");
   if (col === "sessions" && state.sessions[id]) state.sessions[id].u = now;
   if (col === "weights") state.weights[id] = state.weights[id] && state.weights[id].kg ? {...state.weights[id], u: now} : {date: id, deleted: true, u: now};
   if (col === "settings") state.settings.u = now;
+  if (col === "custom") { state.custom.u = now; applyCustom(); }
   lsSave(); Sync.schedule();
 }
 function setSync(){
@@ -353,7 +403,7 @@ const Sync = (() => {
   };
   const pickNewer = (a, b) => (!a ? b : !b ? a : ((b.u || 0) > (a.u || 0) ? b : a));
   function merge(local, remote) {
-    const out = {settings: pickNewer(local.settings, remote.settings) || {}, sessions: {}, weights: {}};
+    const out = {settings: pickNewer(local.settings, remote.settings) || {}, custom: pickNewer(local.custom, remote.custom) || {}, sessions: {}, weights: {}};
     for (const k of ["sessions", "weights"]) {
       const keys = new Set([...Object.keys(local[k] || {}), ...Object.keys(remote[k] || {})]);
       keys.forEach(id => { out[k][id] = pickNewer((local[k] || {})[id], (remote[k] || {})[id]); });
@@ -376,7 +426,7 @@ const Sync = (() => {
     if (f.truncated) text = await (await fetch(f.raw_url)).text();
     try { return JSON.parse(text || "{}"); } catch(e) { return {}; }
   }
-  const snapshot = () => ({app:"trainingsplan", version:1, settings:state.settings, sessions:state.sessions, weights:state.weights});
+  const snapshot = () => ({app:"trainingsplan", version:1, settings:state.settings, sessions:state.sessions, weights:state.weights, custom:state.custom});
   async function run() {
     if (!cfg.token) return;
     if (busy) { again = true; return; }
@@ -394,10 +444,10 @@ const Sync = (() => {
       const remote = await readRemote();
       const merged = merge(snapshot(), remote);
       const mergedText = JSON.stringify({app:"trainingsplan", version:1, ...merged});
-      const remoteText = JSON.stringify({app:"trainingsplan", version:1, settings: remote.settings || {}, sessions: remote.sessions || {}, weights: remote.weights || {}});
-      const localChanged = JSON.stringify(merged) !== JSON.stringify({settings:state.settings, sessions:state.sessions, weights:state.weights});
+      const remoteText = JSON.stringify({app:"trainingsplan", version:1, settings: remote.settings || {}, custom: remote.custom || {}, sessions: remote.sessions || {}, weights: remote.weights || {}});
+      const localChanged = JSON.stringify(merged) !== JSON.stringify({settings:state.settings, custom:state.custom, sessions:state.sessions, weights:state.weights});
       // keep any field the person is typing into right now: re-stamped records win next round
-      state.settings = {...DEFAULTS, ...merged.settings}; state.sessions = merged.sessions; state.weights = merged.weights;
+      state.settings = {...DEFAULTS, ...merged.settings}; state.sessions = merged.sessions; state.weights = merged.weights; state.custom = merged.custom; applyCustom();
       lsSave();
       if (mergedText !== remoteText) await api("/gists/" + cfg.gist, {method:"PATCH", body: JSON.stringify({files: {[FILE]: {content: mergedText}}})});
       cfg.last = Date.now(); save(); status = "ok"; lastErr = "";
@@ -442,7 +492,7 @@ function header() {
   if (dH >= 0) parts.push(`Hyrox in ${dH} Tagen`);
   if (dE >= 0) parts.push(`Heading East in ${dE} Tagen`);
   document.getElementById("countdown").textContent = parts.join(" · ") || "Trainingsplan";
-  document.getElementById("viewTitle").textContent = {day:"Training", week:"Woche", plan:"Plan", progress:"Fortschritt"}[state.tab];
+  document.getElementById("viewTitle").textContent = {day:"Training", week:"Woche", plan:"Plan", progress:"Fortschritt", edit:"Plan anpassen"}[state.tab];
 }
 
 function renderDay() {
@@ -584,6 +634,14 @@ function renderPlan() {
     </div>
     <p class="muted" style="margin:0">Die Kraft aus dem Winter trägt durch Hyrox, das Radvolumen steigt bis zum Taper vor Heading East.</p>
   </section>
+  <section class="card stack">
+    <div class="row between"><h2>Plan anpassen</h2>${Object.keys(state.custom.ex || {}).length + Object.keys(state.custom.workouts || {}).length + Object.keys(state.custom.sessions || {}).length ? `<span class="tag k-strength">angepasst</span>` : ""}</div>
+    <p class="muted" style="margin:0;font-size:13px">Übungen tauschen, Sätze und Wiederholungen ändern, Ausdauer-Einheiten umschreiben. Deine Einträge und Gewichtsverläufe bleiben erhalten.</p>
+    <div class="editlist">
+      ${Object.entries(WORKOUTS).map(([id, w]) => `<button class="editrow" data-editw="${id}"><span><span class="tag k-strength">Kraft</span> ${esc(w.title)}</span><span class="muted">${w.ex.length} Übungen ›</span></button>`).join("")}
+      <button class="editrow" data-edits="list"><span><span class="tag k-bike">Ausdauer</span> Rad-, Lauf- und Hyrox-Einheiten</span><span class="muted">›</span></button>
+    </div>
+  </section>
   <section class="card">
     <h2>Ziele</h2>
     <ul class="plain">
@@ -651,6 +709,8 @@ function renderPlan() {
     </div>
     <p id="backupMsg" class="muted" style="margin:0;font-size:13px" aria-live="polite"></p>
   </section>`;
+  $view.querySelectorAll("[data-editw]").forEach(b => b.onclick = () => { state.edit = {type:"w", id:b.dataset.editw}; setTab("edit"); });
+  $view.querySelectorAll("[data-edits]").forEach(b => b.onclick = () => { state.edit = {type:"slots"}; setTab("edit"); });
   const conn = document.getElementById("syncConnect");
   if (conn) conn.onclick = async () => {
     const t = document.getElementById("syncToken").value.trim(), msg = document.getElementById("syncMsg");
@@ -665,7 +725,7 @@ function renderPlan() {
   const off = document.getElementById("syncOff");
   if (off) off.onclick = () => { Sync.disconnect(); render(); document.getElementById("syncMsg").textContent = "Abgleich auf diesem Gerät ausgeschaltet. Deine Daten bleiben hier und im Gist erhalten."; };
   document.getElementById("exportBtn").onclick = () => {
-    const blob = new Blob([JSON.stringify({app:"trainingsplan", version:1, exported:new Date().toISOString(), settings:state.settings, sessions:state.sessions, weights:state.weights}, null, 1)], {type:"application/json"});
+    const blob = new Blob([JSON.stringify({app:"trainingsplan", version:1, exported:new Date().toISOString(), settings:state.settings, sessions:state.sessions, weights:state.weights, custom:state.custom}, null, 1)], {type:"application/json"});
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `trainingsplan-backup-${TODAY}.json`;
     document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
     document.getElementById("backupMsg").textContent = "Backup erstellt.";
@@ -676,7 +736,7 @@ function renderPlan() {
     f.text().then(t => {
       const j = JSON.parse(t);
       if (j.app !== "trainingsplan" || typeof j.sessions !== "object") throw new Error("format");
-      Object.assign(state.settings, j.settings || {}); state.sessions = j.sessions || {}; state.weights = j.weights || {};
+      Object.assign(state.settings, j.settings || {}); state.sessions = j.sessions || {}; state.weights = j.weights || {}; state.custom = j.custom || {}; applyCustom();
       lsSave(); render();
       document.getElementById("backupMsg").textContent = `Backup vom ${fmtShort((j.exported || TODAY).slice(0,10))} geladen: ${Object.keys(state.sessions).length} Trainingstage, ${Object.keys(state.weights).length} Gewichtseinträge.`;
     }).catch(() => { msg.textContent = "Diese Datei ist kein Backup dieser App. Wähle die Datei „trainingsplan-backup-….json“."; });
@@ -750,14 +810,162 @@ function renderProgress() {
   $view.querySelectorAll("[data-delw]").forEach(b => b.onclick = () => { const d = b.dataset.delw; delete state.weights[d]; persist("weights/"+d, null, true); renderProgress(); });
 }
 
+// ---------- plan editor ----------
+const UNITS = [["", "Wdh."], ["s", "Sekunden"], ["m", "Meter"], ["Schritte", "Schritte"]];
+const SLOT_GROUPS = {b1:"Block 1 · Nov–Feb", "b1f":"Block 1 · Februar", b2:"Block 2 · März", b3r:"Block 3 · Woche nach Hyrox", b3:"Block 3 · Spitzenwochen", b3t:"Block 3 · Taper"};
+const WD_NAMES = ["Sonntag","Montag","Dienstag","Mittwoch","Donnerstag","Freitag","Samstag"];
+function cust() { const c = state.custom; c.ex = c.ex || {}; c.workouts = c.workouts || {}; c.sessions = c.sessions || {}; return c; }
+function saveWorkout(id, patch) {
+  const c = cust(), cur = WORKOUTS[id];
+  c.workouts[id] = {title: cur.title, min: cur.min, int: cur.int, ex: [...cur.ex], ...(c.workouts[id] || {}), ...patch};
+  persist("custom/main");
+}
+function saveEx(id, patch) { const c = cust(); c.ex[id] = {...(c.ex[id] || {}), ...patch}; persist("custom/main"); }
+const backBtn = label => `<button class="today-link" id="editBack" style="align-self:flex-start;font-size:14px">‹ ${label}</button>`;
+
+function renderEdit() {
+  const ed = state.edit || {type:"slots"};
+  if (ed.type === "w") return renderEditWorkout(ed.id);
+  if (ed.type === "s") return renderEditSlot(ed.key);
+  // list of endurance slots
+  const slots = enduranceSlots();
+  let h = backBtn("Zurück zum Plan") + `<p class="muted" style="margin:0">Jede Zeile ist ein fester Platz im Wochenplan. Deine Version gilt für alle Wochen dieses Abschnitts.</p>`;
+  let group = "";
+  slots.forEach(sl => {
+    const g = sl.key === "b1-0f" ? "b1f" : sl.key.split("-")[0];
+    if (g !== group) { if (group) h += `</div>`; group = g; h += `<h3 style="margin-top:6px">${SLOT_GROUPS[g]}</h3><div class="editlist">`; }
+    const o = cust().sessions[sl.key], x = o ? {...sl.base, ...o} : sl.base;
+    h += `<button class="editrow" data-slot="${sl.key}"><span style="min-width:0"><span class="muted" style="display:inline-block;width:34px">${DAYS[parseInt(sl.key.split("-")[1])]}</span> <span class="tag k-${x.kind}">${kindLabel[x.kind]}</span> ${esc(x.title)}${o ? ` <span class="tag k-strength">angepasst</span>` : ""}</span><span class="muted">›</span></button>`;
+  });
+  if (group) h += `</div>`;
+  $view.innerHTML = h;
+  document.getElementById("editBack").onclick = () => setTab("plan");
+  $view.querySelectorAll("[data-slot]").forEach(b => b.onclick = () => { state.edit = {type:"s", key:b.dataset.slot}; render(); window.scrollTo(0,0); });
+}
+
+function renderEditSlot(key) {
+  const sl = enduranceSlots().find(s => s.key === key); if (!sl) { state.edit = {type:"slots"}; return render(); }
+  const o = cust().sessions[key], x = o ? {...sl.base, ...o, steps: o.steps || sl.base.steps} : sl.base;
+  const g = key === "b1-0f" ? "b1f" : key.split("-")[0];
+  $view.innerHTML = backBtn("Alle Ausdauer-Einheiten") + `
+  <section class="card stack">
+    <div><div class="eyebrow">${SLOT_GROUPS[g]} · ${WD_NAMES[parseInt(key.split("-")[1])]}</div><h2 style="margin-top:4px">${esc(x.title)}</h2></div>
+    <label class="field">Art<select id="sl-kind">${["bike","run","hyrox","rest"].map(k => `<option value="${k}"${x.kind === k ? " selected" : ""}>${kindLabel[k]}</option>`).join("")}</select></label>
+    <label class="field">Titel<input id="sl-title" value="${esc(x.title)}"></label>
+    <label class="field">Dauer<input id="sl-dur" value="${esc(x.dur || "")}" placeholder="z. B. 90 min oder 2–3 h"></label>
+    <label class="field">Inhalt, eine Zeile pro Punkt<textarea id="sl-steps" rows="5">${esc((x.steps || []).join("\n"))}</textarea></label>
+    <p class="muted" style="margin:0;font-size:13px">Die Dauer zählt in die Wochenstunden, wenn sie als „90 min“ oder „2,5 h“ geschrieben ist.${!o && /FTP/.test((sl.base.steps || []).join(" ")) ? " Hinweis: Im Standard rechnet die App Watt aus deinem FTP. In deiner eigenen Version steht der Text so, wie du ihn schreibst." : ""}</p>
+    <div class="row" style="flex-wrap:wrap"><button class="btn" id="sl-save">Speichern</button>${o ? `<button class="btn ghost" id="sl-reset">Standard wiederherstellen</button>` : ""}</div>
+    <p id="sl-msg" class="muted" style="margin:0;font-size:13px" aria-live="polite"></p>
+  </section>
+  ${o ? `<section class="card"><div class="eyebrow">Standard aus dem Plan</div><p style="margin:6px 0 0"><b>${esc(sl.base.title)}</b> · ${esc(sl.base.dur || "")}</p><ul class="steps">${(sl.base.steps || []).map(t => `<li>${esc(t)}</li>`).join("")}</ul></section>` : ""}`;
+  document.getElementById("editBack").onclick = () => { state.edit = {type:"slots"}; render(); };
+  document.getElementById("sl-save").onclick = () => {
+    const title = document.getElementById("sl-title").value.trim();
+    if (!title) { document.getElementById("sl-msg").textContent = "Gib der Einheit einen Titel."; return; }
+    cust().sessions[key] = {kind: document.getElementById("sl-kind").value, title, dur: document.getElementById("sl-dur").value.trim(),
+      steps: document.getElementById("sl-steps").value.split("\n").map(t => t.trim()).filter(Boolean)};
+    persist("custom/main"); renderEditSlot(key); document.getElementById("sl-msg").textContent = "Gespeichert. Gilt ab sofort für alle Wochen dieses Abschnitts.";
+  };
+  const rs = document.getElementById("sl-reset");
+  if (rs) rs.onclick = () => { delete cust().sessions[key]; persist("custom/main"); renderEditSlot(key); document.getElementById("sl-msg").textContent = "Standard wiederhergestellt."; };
+}
+
+function renderEditWorkout(id) {
+  const w = WORKOUTS[id], c = cust(), changed = !!c.workouts[id] || WORKOUTS_BASE[id].ex.some(e => c.ex[e]);
+  const others = Object.entries(EX).filter(([eid, e]) => !w.ex.includes(eid) && !e.link).sort((a, b) => a[1].name.localeCompare(b[1].name, "de"));
+  let h = backBtn("Zurück zum Plan") + `
+  <section class="card stack">
+    <label class="field">Name der Einheit<input id="w-title" value="${esc(w.title)}"></label>
+    <div class="grid2">
+      <label class="field">Dauer (min)<input id="w-min" inputmode="numeric" value="${w.min}"></label>
+      <label class="field">Intensität<input id="w-int" value="${esc(w.int || "")}"></label>
+    </div>
+  </section>`;
+  w.ex.forEach((eid, i) => {
+    const e = EX[eid];
+    h += `<section class="card stack exedit" data-eid="${eid}">
+      <div class="row between"><span class="eyebrow">Übung ${i + 1}</span><span class="row" style="gap:4px">
+        <button class="iconbtn sm" data-mv="-1" data-i="${i}" aria-label="Nach oben"${i === 0 ? " disabled" : ""}>↑</button>
+        <button class="iconbtn sm" data-mv="1" data-i="${i}" aria-label="Nach unten"${i === w.ex.length - 1 ? " disabled" : ""}>↓</button>
+        <button class="iconbtn sm" data-rm="${i}" aria-label="Übung entfernen">✕</button></span></div>
+      <label class="field">Übung<input data-f="name" value="${esc(e.name)}"></label>
+      <div class="grid3">
+        <label class="field">Sätze<input data-f="sets" inputmode="numeric" value="${e.sets}"></label>
+        <label class="field">${e.unit ? "Ziel von" : "Wdh. von"}<input data-f="lo" inputmode="numeric" value="${e.lo}"></label>
+        <label class="field">bis<input data-f="hi" inputmode="numeric" value="${e.hi}"></label>
+      </div>
+      <div class="grid3">
+        <label class="field">Einheit<select data-f="unit">${UNITS.map(([v, l]) => `<option value="${v}"${(e.unit || "") === v ? " selected" : ""}>${l}</option>`).join("")}</select></label>
+        <label class="field">Steigerung kg<input data-f="inc" inputmode="decimal" value="${e.bodyweight ? "" : num(e.inc ?? 2.5)}" ${e.bodyweight ? "disabled" : ""}></label>
+        <label class="field">Start kg<input data-f="start" inputmode="decimal" value="${e.start != null ? num(e.start) : ""}" placeholder="frei" ${e.bodyweight ? "disabled" : ""}></label>
+      </div>
+      <label class="row" style="font-size:14px;gap:8px"><input type="checkbox" data-f="bodyweight"${e.bodyweight ? " checked" : ""}> Ohne Gewicht (z. B. Plank, Klimmzüge mit Körpergewicht)</label>
+    </section>`;
+  });
+  h += `<section class="card stack">
+    <h3>Übung hinzufügen</h3>
+    <label class="field">Aus deinen Übungen<select id="addExisting"><option value="">Übung wählen …</option>${others.map(([eid, e]) => `<option value="${eid}">${esc(e.name)}</option>`).join("")}</select></label>
+    <div class="row" style="flex-wrap:wrap"><button class="btn ghost" id="addNew">Neue Übung anlegen</button></div>
+  </section>
+  ${changed ? `<button class="btn ghost" id="w-reset">Diese Einheit auf den Originalplan zurücksetzen</button>` : ""}
+  <p id="w-msg" class="muted" style="margin:0;font-size:13px" aria-live="polite"></p>`;
+  $view.innerHTML = h;
+  document.getElementById("editBack").onclick = () => setTab("plan");
+  const rerender = msg => { renderEditWorkout(id); if (msg) document.getElementById("w-msg").textContent = msg; };
+  document.getElementById("w-title").addEventListener("input", ev => { if (ev.target.value.trim()) saveWorkout(id, {title: ev.target.value.trim()}); });
+  document.getElementById("w-min").addEventListener("input", ev => { const v = parseInt(ev.target.value, 10); if (v > 0 && v < 600) saveWorkout(id, {min: v}); });
+  document.getElementById("w-int").addEventListener("input", ev => saveWorkout(id, {int: ev.target.value.trim()}));
+  $view.querySelectorAll(".exedit").forEach(card => {
+    const eid = card.dataset.eid;
+    card.querySelectorAll("[data-f]").forEach(inp => inp.addEventListener(inp.type === "checkbox" || inp.tagName === "SELECT" ? "change" : "input", () => {
+      const f = inp.dataset.f, raw = inp.value.trim().replace(",", ".");
+      if (f === "name") { if (raw) saveEx(eid, {name: inp.value.trim()}); return; }
+      if (f === "unit") { saveEx(eid, {unit: raw || null}); return rerender(); }
+      if (f === "bodyweight") { saveEx(eid, {bodyweight: inp.checked}); return rerender(); }
+      if (f === "start") { if (raw !== "" && !(Number(raw) >= 0)) return; saveEx(eid, {start: raw === "" ? null : Number(raw)}); return; }
+      const v = Number(raw); if (!(v > 0) || v > 1000) return;
+      const patch = {[f]: f === "inc" ? v : Math.round(v)};
+      const cur = {...EX[eid], ...patch};
+      if (f === "lo" && cur.hi < cur.lo) patch.hi = cur.lo;
+      if (f === "hi" && cur.hi < cur.lo) return;
+      saveEx(eid, patch);
+    }));
+  });
+  $view.querySelectorAll("[data-mv]").forEach(b => b.onclick = () => {
+    const i = +b.dataset.i, j = i + +b.dataset.mv, list = [...WORKOUTS[id].ex]; [list[i], list[j]] = [list[j], list[i]];
+    saveWorkout(id, {ex: list}); rerender();
+  });
+  $view.querySelectorAll("[data-rm]").forEach(b => b.onclick = () => {
+    const i = +b.dataset.rm, list = [...WORKOUTS[id].ex], name = EX[list[i]].name; list.splice(i, 1);
+    saveWorkout(id, {ex: list}); rerender(`„${name}“ entfernt. Bisherige Einträge dazu bleiben gespeichert, du kannst die Übung unten wieder hinzufügen.`);
+  });
+  document.getElementById("addExisting").addEventListener("change", ev => {
+    const eid = ev.target.value; if (!eid) return;
+    saveWorkout(id, {ex: [...WORKOUTS[id].ex, eid]}); rerender(`„${EX[eid].name}“ hinzugefügt.`); window.scrollTo(0, document.body.scrollHeight);
+  });
+  document.getElementById("addNew").onclick = () => {
+    const eid = "x_" + Date.now().toString(36);
+    cust().ex[eid] = {name: "Neue Übung", sets: 3, lo: 8, hi: 12, inc: 2.5};
+    saveWorkout(id, {ex: [...WORKOUTS[id].ex, eid]}); rerender();
+    const inp = $view.querySelector(`.exedit[data-eid="${eid}"] [data-f="name"]`); if (inp) { inp.scrollIntoView({block:"center"}); inp.select(); }
+  };
+  const rs = document.getElementById("w-reset");
+  if (rs) rs.onclick = () => {
+    if (rs.dataset.armed !== "1") { rs.dataset.armed = "1"; rs.textContent = "Wirklich zurücksetzen? Nochmal tippen"; return; }
+    delete c.workouts[id]; WORKOUTS_BASE[id].ex.forEach(e => delete c.ex[e]);
+    persist("custom/main"); rerender("Auf den Originalplan zurückgesetzt. Deine Einträge bleiben erhalten.");
+  };
+}
+
 function render() {
   header();
-  ({day:renderDay, week:renderWeek, plan:renderPlan, progress:renderProgress})[state.tab]();
+  ({day:renderDay, week:renderWeek, plan:renderPlan, progress:renderProgress, edit:renderEdit})[state.tab]();
 }
 function setTab(t) {
   state.tab = t;
   if (t === "week") state.weekStart = mondayOf(state.date);
-  document.querySelectorAll("nav.tabs button").forEach(b => b.setAttribute("aria-current", b.dataset.tab === t ? "page" : "false"));
+  document.querySelectorAll("nav.tabs button").forEach(b => b.setAttribute("aria-current", b.dataset.tab === (t === "edit" ? "plan" : t) ? "page" : "false"));
   render(); window.scrollTo(0, 0);
 }
 document.querySelectorAll("nav.tabs button").forEach(b => b.onclick = () => setTab(b.dataset.tab));
