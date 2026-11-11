@@ -145,6 +145,18 @@ details.warm summary{cursor:pointer;color:var(--accent);font-weight:600}
 .dayrow select{height:42px;min-width:0;width:100%;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:15px;padding:0 8px}
 .garmin{display:flex;flex-direction:column;gap:4px;margin-top:10px;font-size:13.5px}
 .gdot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ok);margin-right:7px;vertical-align:1px}
+.dayactions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px;font-size:13px}
+.chip{border:1px solid var(--line);background:var(--surface);border-radius:99px;padding:7px 12px;font-size:13px;font-weight:600;color:var(--fg)}
+.chip[aria-expanded="true"]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.picker{margin-top:10px;border:1px solid var(--line);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:6px}
+.pick{display:grid;grid-template-columns:34px minmax(0,1fr);gap:8px;align-items:center;text-align:left;border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:8px 10px}
+.pick .pd{font-family:var(--display);font-weight:700;font-size:16px}
+.pick .pt{overflow-wrap:anywhere}
+.flag{display:inline-block;font-size:11px;font-weight:600;color:var(--warn);border:1px solid currentColor;border-radius:5px;padding:0 5px;margin-left:4px;vertical-align:1px}
+.wday.skipped .wt s{color:var(--muted)}
+.wday.editing{grid-template-columns:52px minmax(0,1fr) auto}
+.wctl{display:flex;gap:4px;align-items:center}
+.iconbtn.ghost{visibility:hidden}
 .del{background:none;border:0;color:var(--muted);padding:4px 8px}
 /* tabbar */
 nav.tabs{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px);padding-left:max(8px,env(safe-area-inset-left,0px));padding-right:max(8px,env(safe-area-inset-right,0px));z-index:20}
@@ -353,11 +365,48 @@ function arrangedBase(date) {
   const x = sessionBase(srcDate);
   return {...x, moved: true, from: Number(src)};
 }
-function sessionFor(date) {
-  const x = arrangedBase(date), o = x.key && x.kind !== "strength" && ((state.custom || {}).sessions || {})[x.key];
+// one-off changes for a single date, kept in the day's record (synced like your entries):
+// sessions[date].src  = date in the same week whose session takes place here (a swap sets both days)
+// sessions[date].skip = true → this session drops out this week
+const fixedDate = d => d === state.settings.hyrox || d === state.settings.event;
+function srcOf(date) {
+  const r = state.sessions[date] || {};
+  return r.src && r.src !== date && mondayOf(r.src) === mondayOf(date) && !fixedDate(r.src) && !fixedDate(date) ? r.src : date;
+}
+function sessionCore(date) {
+  const src = srcOf(date);
+  let x = arrangedBase(src);
+  if (src !== date) x = {...x, movedFrom: src};
+  const o = x.key && x.kind !== "strength" && ((state.custom || {}).sessions || {})[x.key];
   if (!o) return x;
   return {...x, ...o, steps: o.steps && o.steps.length ? o.steps : x.steps, note: o.steps ? "" : x.note, edited: true};
 }
+function sessionFor(date) {
+  if ((state.sessions[date] || {}).skip) {
+    const orig = sessionCore(date);
+    return {kind:"rest", title:"Ausgelassen", dur:"", steps:[`${orig.title} fällt in dieser Woche aus.`], skipped:true, orig};
+  }
+  return sessionCore(date);
+}
+// swap what happens on two days of the same week
+function swapDays(a, b) {
+  if (a === b || mondayOf(a) !== mondayOf(b) || fixedDate(a) || fixedDate(b)) return;
+  const sa = srcOf(a), sb = srcOf(b), ra = ensure(a), rb = ensure(b);
+  const ka = !!ra.skip, kb = !!rb.skip;
+  if (sb === a) delete ra.src; else ra.src = sb;
+  if (sa === b) delete rb.src; else rb.src = sa;
+  if (kb) ra.skip = true; else delete ra.skip;
+  if (ka) rb.skip = true; else delete rb.skip;
+  persist("sessions/" + a); persist("sessions/" + b);
+}
+function setSkip(d, on) { const r = ensure(d); if (on) r.skip = true; else delete r.skip; persist("sessions/" + d); }
+function resetWeek(ws) {
+  for (let i = 0; i < 7; i++) {
+    const d = addDays(ws, i), r = state.sessions[d];
+    if (r && (r.src || r.skip)) { delete r.src; delete r.skip; persist("sessions/" + d); }
+  }
+}
+const weekChanged = ws => [0,1,2,3,4,5,6].some(i => { const r = state.sessions[addDays(ws, i)] || {}; return r.src || r.skip; });
 // every editable endurance slot, with the first date it occurs (for showing its default)
 function enduranceSlots() {
   const s = state.settings, out = [], seen = new Set();
@@ -622,6 +671,22 @@ function renderDay() {
       <div class="meta">${[x.dur, x.intensity].filter(Boolean).map(esc).join(" · ")}</div></div>
       ${x.kind !== "rest" ? `<button class="donebtn" id="doneBtn" aria-pressed="${done}">${done ? (auto ? "✓ Garmin" : "✓ Erledigt") : "Erledigt"}</button>` : ""}
     </div>`;
+  if (!fixedDate(d)) {
+    const moved = x.movedFrom || (x.orig && x.orig.movedFrom);
+    h += `<div class="dayactions">
+      ${x.skipped ? `<span class="muted">${esc(x.orig.title)} fällt diese Woche aus.</span><button class="chip" id="unskip">Wieder einplanen</button>`
+        : `<button class="chip" id="moveBtn" aria-expanded="${state.movePick === d}">${x.kind === "rest" ? "Einheit hierher holen" : "Verschieben"}</button>
+           ${x.kind !== "rest" ? `<button class="chip" id="skipBtn">Diese Woche auslassen</button>` : ""}`}
+      ${moved ? `<span class="muted">Verschoben von ${WD_NAMES[parse(moved).getDay()]}</span>` : ""}
+    </div>`;
+    if (state.movePick === d && !x.skipped) {
+      const ws = mondayOf(d);
+      h += `<div class="picker"><div class="eyebrow">${x.kind === "rest" ? "Welche Einheit soll an diesen Tag?" : "Tauschen mit"}</div>${[0,1,2,3,4,5,6].map(i => addDays(ws, i)).filter(o => o !== d && !fixedDate(o)).map(o => {
+        const y = sessionFor(o);
+        return `<button class="pick" data-swap="${o}"><span class="pd">${DAYS[parse(o).getDay()]}</span><span class="pt"><span class="tag k-${y.kind}">${kindLabel[y.kind]}</span> ${esc(y.title)}</span></button>`;
+      }).join("")}<p class="muted" style="margin:6px 0 0;font-size:12.5px">Die beiden Tage tauschen ihre Einheiten, nur in dieser Woche.</p></div>`;
+    }
+  }
   if (garminActs(d).length) h += `<div class="garmin">${garminActs(d).map(a => `<div><span class="gdot"></span>${esc(actLine(a))}${a.name && GARMIN_TYPES[a.type] ? ` <span class="muted">· ${esc(a.name)}</span>` : ""}</div>`).join("")}</div>`;
   if (x.kind === "strength") {
     const W = WORKOUTS[x.w], sp = strengthPhase(d);
@@ -661,9 +726,13 @@ function renderDay() {
   h += `</section>`;
   $view.innerHTML = h;
 
-  document.getElementById("prevDay").onclick = () => { state.date = addDays(state.date, -1); render(); };
-  document.getElementById("nextDay").onclick = () => { state.date = addDays(state.date, 1); render(); };
+  document.getElementById("prevDay").onclick = () => { state.date = addDays(state.date, -1); state.movePick = null; render(); };
+  document.getElementById("nextDay").onclick = () => { state.date = addDays(state.date, 1); state.movePick = null; render(); };
   const tt = document.getElementById("toToday"); if (tt) tt.onclick = () => { state.date = TODAY; render(); };
+  const mv = document.getElementById("moveBtn"); if (mv) mv.onclick = () => { state.movePick = state.movePick === d ? null : d; renderDay(); };
+  const sk = document.getElementById("skipBtn"); if (sk) sk.onclick = () => { setSkip(d, true); state.movePick = null; renderDay(); };
+  const us = document.getElementById("unskip"); if (us) us.onclick = () => { setSkip(d, false); renderDay(); };
+  $view.querySelectorAll("[data-swap]").forEach(b => b.onclick = () => { swapDays(d, b.dataset.swap); state.movePick = null; renderDay(); });
   const db_ = document.getElementById("doneBtn");
   if (db_) db_.onclick = () => { const r = ensure(d); r.done = !isDone(d, x); persist("sessions/"+d, r, true); renderDay(); };
   $view.querySelectorAll("input[data-ex]").forEach(inp => inp.addEventListener("input", () => {
@@ -703,18 +772,31 @@ function durHours(dur) {
   return tot;
 }
 function renderWeek() {
-  const ws = state.weekStart;
+  const ws = state.weekStart, edit = !!state.weekEdit;
   let planned = 0, doneH = 0, doneN = 0, total = 0;
   let rows = "";
   for (let i = 0; i < 7; i++) {
     const d = addDays(ws, i), x = sessionFor(d), r = state.sessions[d] || {}, hrs = durHours(x.dur);
     const dn = isDone(d, x), gm = garminMatch(d, x), gmin = gm.reduce((t, a) => t + (a.min || 0), 0);
     planned += hrs; if (x.kind !== "rest") total++; if (dn) { doneN++; doneH += gm.length && r.done !== true ? gmin / 60 : hrs; }
-    rows += `<button class="wday${d === TODAY ? " is-today" : ""}" data-go="${d}">
-      <div><div class="dname">${DAYS[parse(d).getDay()]}</div><div class="ddate">${fmtShort(d)}</div></div>
-      <div style="min-width:0"><div class="wt">${esc(x.title)}</div><div class="wd"><span class="tag k-${x.kind}" style="margin-right:6px">${kindLabel[x.kind]}</span>${esc(x.dur || "")}</div></div>
-      ${x.kind === "rest" ? "<span></span>" : `<span class="check${dn ? " on" : ""}" aria-label="${dn ? "erledigt" : "offen"}">${dn ? "✓" : ""}</span>`}
-    </button>`;
+    const flag = x.skipped ? `<span class="flag">ausgelassen</span>` : x.movedFrom ? `<span class="flag">von ${DAYS[parse(x.movedFrom).getDay()]}</span>` : "";
+    const title = x.skipped ? `<s>${esc(x.orig.title)}</s>` : esc(x.title);
+    const info = `<div><div class="dname">${DAYS[parse(d).getDay()]}</div><div class="ddate">${fmtShort(d)}</div></div>
+      <div style="min-width:0"><div class="wt">${title} ${flag}</div><div class="wd"><span class="tag k-${x.kind}" style="margin-right:6px">${kindLabel[x.kind]}</span>${esc(x.dur || "")}</div></div>`;
+    if (edit) {
+      const locked = fixedDate(d);
+      rows += `<div class="wday editing${d === TODAY ? " is-today" : ""}">${info}
+        <span class="wctl">${locked ? `<span class="muted" style="font-size:12px">fest</span>` : `
+          <button class="iconbtn sm" data-up="${d}" aria-label="Mit dem Vortag tauschen"${i === 0 || fixedDate(addDays(d, -1)) ? " disabled" : ""}>↑</button>
+          <button class="iconbtn sm" data-down="${d}" aria-label="Mit dem nächsten Tag tauschen"${i === 6 || fixedDate(addDays(d, 1)) ? " disabled" : ""}>↓</button>
+          ${x.skipped ? `<button class="iconbtn sm" data-unskip="${d}" aria-label="Wieder einplanen">↺</button>`
+            : x.kind === "rest" ? `<span class="iconbtn sm ghost"></span>` : `<button class="iconbtn sm" data-skip="${d}" aria-label="Diese Woche auslassen">✕</button>`}`}
+        </span></div>`;
+    } else {
+      rows += `<button class="wday${d === TODAY ? " is-today" : ""}${x.skipped ? " skipped" : ""}" data-go="${d}">${info}
+        ${x.kind === "rest" ? "<span></span>" : `<span class="check${dn ? " on" : ""}" aria-label="${dn ? "erledigt" : "offen"}">${dn ? "✓" : ""}</span>`}
+      </button>`;
+    }
   }
   const x0 = sessionFor(ws);
   const wk = phaseOf(ws).id === "b1" ? `Woche ${block1Week(ws)} von Block 1` : phaseOf(ws).label;
@@ -727,12 +809,22 @@ function renderWeek() {
       <div class="stat"><div class="v">${num(Math.round(doneH*10)/10)} h</div><div class="l">erledigt</div></div>
       <div class="stat"><div class="v">${doneN}/${total}</div><div class="l">Einheiten</div></div>
     </div>
+    <div class="row between"><span class="muted" style="font-size:13px">${edit ? "↑ ↓ tauscht mit dem Nachbartag, ✕ lässt die Einheit diese Woche aus." : weekChanged(ws) ? "Diese Woche ist angepasst." : ""}</span>
+      <button class="chip" id="weekEdit">${edit ? "Fertig" : "Woche bearbeiten"}</button></div>
     <div class="week">${rows}</div>
+    ${weekChanged(ws) ? `<button class="btn ghost" id="weekReset">Diese Woche auf den Plan zurücksetzen</button>` : ""}
     ${mondayOf(TODAY) !== ws ? `<button class="btn ghost" id="thisW">Zur aktuellen Woche</button>` : ""}`;
   document.getElementById("prevW").onclick = () => { state.weekStart = addDays(ws, -7); render(); };
   document.getElementById("nextW").onclick = () => { state.weekStart = addDays(ws, 7); render(); };
+  document.getElementById("weekEdit").onclick = () => { state.weekEdit = !edit; render(); };
   const tw = document.getElementById("thisW"); if (tw) tw.onclick = () => { state.weekStart = mondayOf(TODAY); render(); };
-  $view.querySelectorAll("[data-go]").forEach(b => b.onclick = () => { state.date = b.dataset.go; setTab("day"); });
+  const wr = document.getElementById("weekReset");
+  if (wr) wr.onclick = () => { if (wr.dataset.armed !== "1") { wr.dataset.armed = "1"; wr.textContent = "Wirklich zurücksetzen? Nochmal tippen"; return; } resetWeek(ws); render(); };
+  $view.querySelectorAll("[data-go]").forEach(b => b.onclick = () => { state.date = b.dataset.go; state.movePick = null; setTab("day"); });
+  $view.querySelectorAll("[data-up]").forEach(b => b.onclick = () => { swapDays(b.dataset.up, addDays(b.dataset.up, -1)); render(); });
+  $view.querySelectorAll("[data-down]").forEach(b => b.onclick = () => { swapDays(b.dataset.down, addDays(b.dataset.down, 1)); render(); });
+  $view.querySelectorAll("[data-skip]").forEach(b => b.onclick = () => { setSkip(b.dataset.skip, true); render(); });
+  $view.querySelectorAll("[data-unskip]").forEach(b => b.onclick = () => { setSkip(b.dataset.unskip, false); render(); });
 }
 
 function renderPlan() {
@@ -1167,6 +1259,7 @@ function render() {
 function setTab(t) {
   state.tab = t;
   if (t === "week") state.weekStart = mondayOf(state.date);
+  if (t !== "week") state.weekEdit = false;
   document.querySelectorAll("nav.tabs button").forEach(b => b.setAttribute("aria-current", b.dataset.tab === (t === "edit" ? "plan" : t) ? "page" : "false"));
   render(); window.scrollTo(0, 0);
 }
