@@ -134,6 +134,7 @@ input[type="checkbox"]{width:20px;height:20px;accent-color:var(--accent)}
 .phasebox b{color:var(--accent)}
 details.warm{margin-top:10px;font-size:14px}
 details.warm summary{cursor:pointer;color:var(--accent);font-weight:600}
+.last{font-size:13px;font-weight:600;margin-top:3px}
 .tip{font-size:12.5px;color:var(--muted);margin-top:2px}
 .seg{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;padding:4px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
 .seg button{border:0;background:none;padding:8px 4px;border-radius:7px;font-weight:600;font-size:13px;color:var(--muted)}
@@ -410,6 +411,23 @@ function prescription(id, date) {
 }
 const roundKg = (v, e) => { const st = (e.inc || 0) >= 2.5 ? 2.5 : (e.inc || 1); return Math.round(v / st) * st; };
 const topKg = h => Math.max(...h.sets.map(x => Number(x.kg)));
+// "Zuletzt am 4. Nov: 45 kg × 8 · 8 · 8" (sets grouped by weight, any earlier session incl. deloads)
+function lastText(id, date) {
+  const e = EX[id], h = history(id).filter(x => x.date < date);
+  if (!h.length) return "";
+  const last = h[h.length - 1], unit = e.unit ? " " + e.unit : "", groups = [];
+  last.sets.forEach(x => {
+    const kg = Number(x.kg), g = groups[groups.length - 1];
+    if (g && g.kg === kg) g.reps.push(x.reps); else groups.push({kg, reps: [x.reps]});
+  });
+  const body = groups.map(g => {
+    const reps = g.reps.join(" · ") + unit;
+    if (e.bodyweight) return g.kg > 0 ? `+${num(g.kg)} kg × ${reps}` : `${reps}${e.unit ? "" : " Wdh."}`;
+    return `${num(g.kg)} kg × ${reps}`;
+  }).join(", ");
+  const other = last.eid !== id ? ` (${EX[last.eid].name})` : "";
+  return `Zuletzt am ${fmtShort(last.date)}${other}: ${body}`;
+}
 function reached(h) { const p = prescription(h.eid, h.date); return h.sets.length >= p.sets && h.sets.every(x => Number(x.reps) >= p.hi); }
 function suggestion(id, date) {
   const e = EX[id], sp = strengthPhase(date);
@@ -589,6 +607,8 @@ function renderDay() {
       const unit = e.unit || "Wdh.";
       const target = `${nSets} × ${pr.lo === pr.hi ? pr.lo : pr.lo + "–" + pr.hi} ${e.unit ? e.unit : ""}${e.per ? " " + e.per : ""}`.trim();
       h += `<div class="ex"><div class="ex-head"><span class="ex-name">${esc(e.name)}</span><span class="ex-target num">${esc(target)}${e.pause ? " · " + esc(e.pause) : ""}</span></div>`;
+      const lt = lastText(id, d);
+      if (lt) h += `<div class="last num">${esc(lt)}</div>`;
       if (sug.text) h += `<div class="hint${sug.warn ? " warn" : ""}">${esc(sug.text)}</div>`;
       if (e.tip) h += `<div class="tip">${esc(e.tip)}</div>`;
       h += `<div class="sets"><span class="h">Satz</span><span class="h">${e.bodyweight ? "Zusatz-kg" : "kg"}</span><span class="h">${unit === "Wdh." ? "Wdh." : esc(unit)}</span><span></span>`;
