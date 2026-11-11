@@ -143,6 +143,8 @@ details.warm summary{cursor:pointer;color:var(--accent);font-weight:600}
 .dayrow{display:grid;grid-template-columns:36px minmax(0,1fr);gap:8px;align-items:center}
 .dayrow .dname{font-family:var(--display);font-weight:700;font-size:18px}
 .dayrow select{height:42px;min-width:0;width:100%;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;font-size:15px;padding:0 8px}
+.garmin{display:flex;flex-direction:column;gap:4px;margin-top:10px;font-size:13.5px}
+.gdot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ok);margin-right:7px;vertical-align:1px}
 .del{background:none;border:0;color:var(--muted);padding:4px 8px}
 /* tabbar */
 nav.tabs{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px);padding-left:max(8px,env(safe-area-inset-left,0px));padding-right:max(8px,env(safe-area-inset-right,0px));z-index:20}
@@ -237,7 +239,7 @@ const TODAY = iso(new Date());
 // ---------- state ----------
 const state = {
   tab: "day", date: TODAY, weekStart: mondayOf(TODAY),
-  settings: {...DEFAULTS}, sessions: {}, weights: {}, custom: {}, source: "local", edit: null
+  settings: {...DEFAULTS}, sessions: {}, weights: {}, custom: {}, garmin: {}, source: "local", edit: null
 };
 
 // ---------- your own changes to the plan (state.custom) ----------
@@ -456,8 +458,8 @@ function suggestion(id, date) {
 // ---------- storage (on this device) ----------
 const LS = "trainingsplan-v1";
 let storageOk = true;
-function lsLoad(){ try { const j = JSON.parse(localStorage.getItem(LS) || "{}"); Object.assign(state.settings, j.settings||{}); state.sessions = j.sessions||{}; state.weights = j.weights||{}; state.custom = j.custom||{}; applyCustom(); } catch(e){ storageOk = false; } }
-function lsSave(){ try { localStorage.setItem(LS, JSON.stringify({version:1, settings:state.settings, sessions:state.sessions, weights:state.weights, custom:state.custom})); storageOk = true; } catch(e){ storageOk = false; } setSync(); }
+function lsLoad(){ try { const j = JSON.parse(localStorage.getItem(LS) || "{}"); Object.assign(state.settings, j.settings||{}); state.sessions = j.sessions||{}; state.weights = j.weights||{}; state.custom = j.custom||{}; state.garmin = j.garmin||{}; applyCustom(); } catch(e){ storageOk = false; } }
+function lsSave(){ try { localStorage.setItem(LS, JSON.stringify({version:1, settings:state.settings, sessions:state.sessions, weights:state.weights, custom:state.custom, garmin:state.garmin})); storageOk = true; } catch(e){ storageOk = false; } setSync(); }
 // every change stamps the record with `u` (ms) so two devices can be merged record by record
 function persist(path) {
   const now = Date.now(), [col, id] = (path || "").split("/");
@@ -488,8 +490,8 @@ const Sync = (() => {
   };
   const pickNewer = (a, b) => (!a ? b : !b ? a : ((b.u || 0) > (a.u || 0) ? b : a));
   function merge(local, remote) {
-    const out = {settings: pickNewer(local.settings, remote.settings) || {}, custom: pickNewer(local.custom, remote.custom) || {}, sessions: {}, weights: {}};
-    for (const k of ["sessions", "weights"]) {
+    const out = {settings: pickNewer(local.settings, remote.settings) || {}, custom: pickNewer(local.custom, remote.custom) || {}, sessions: {}, weights: {}, garmin: {}};
+    for (const k of ["sessions", "weights", "garmin"]) {
       const keys = new Set([...Object.keys(local[k] || {}), ...Object.keys(remote[k] || {})]);
       keys.forEach(id => { out[k][id] = pickNewer((local[k] || {})[id], (remote[k] || {})[id]); });
     }
@@ -511,7 +513,7 @@ const Sync = (() => {
     if (f.truncated) text = await (await fetch(f.raw_url)).text();
     try { return JSON.parse(text || "{}"); } catch(e) { return {}; }
   }
-  const snapshot = () => ({app:"trainingsplan", version:1, settings:state.settings, sessions:state.sessions, weights:state.weights, custom:state.custom});
+  const snapshot = () => ({app:"trainingsplan", version:1, settings:state.settings, sessions:state.sessions, weights:state.weights, custom:state.custom, garmin:state.garmin});
   async function run() {
     if (!cfg.token) return;
     if (busy) { again = true; return; }
@@ -529,10 +531,10 @@ const Sync = (() => {
       const remote = await readRemote();
       const merged = merge(snapshot(), remote);
       const mergedText = JSON.stringify({app:"trainingsplan", version:1, ...merged});
-      const remoteText = JSON.stringify({app:"trainingsplan", version:1, settings: remote.settings || {}, custom: remote.custom || {}, sessions: remote.sessions || {}, weights: remote.weights || {}});
-      const localChanged = JSON.stringify(merged) !== JSON.stringify({settings:state.settings, custom:state.custom, sessions:state.sessions, weights:state.weights});
+      const remoteText = JSON.stringify({app:"trainingsplan", version:1, settings: remote.settings || {}, custom: remote.custom || {}, sessions: remote.sessions || {}, weights: remote.weights || {}, garmin: remote.garmin || {}});
+      const localChanged = JSON.stringify(merged) !== JSON.stringify({settings:state.settings, custom:state.custom, sessions:state.sessions, weights:state.weights, garmin:state.garmin});
       // keep any field the person is typing into right now: re-stamped records win next round
-      state.settings = {...DEFAULTS, ...merged.settings}; state.sessions = merged.sessions; state.weights = merged.weights; state.custom = merged.custom; applyCustom();
+      state.settings = {...DEFAULTS, ...merged.settings}; state.sessions = merged.sessions; state.weights = merged.weights; state.custom = merged.custom; state.garmin = merged.garmin; applyCustom();
       lsSave();
       if (mergedText !== remoteText) await api("/gists/" + cfg.gist, {method:"PATCH", body: JSON.stringify({files: {[FILE]: {content: mergedText}}})});
       cfg.last = Date.now(); save(); status = "ok"; lastErr = "";
@@ -580,9 +582,34 @@ function header() {
   document.getElementById("viewTitle").textContent = {day:"Training", week:"Woche", plan:"Plan", progress:"Fortschritt", edit:"Plan anpassen"}[state.tab];
 }
 
+// ---------- Garmin ----------
+// state.garmin[date] = {acts:[{id, kind:"bike"|"run"|"other", type, name, min, km, w, hr}], u}
+// filled by tools/garmin_sync.py via the sync gist; rad and lauf days tick themselves off
+const GARMIN_TYPES = {road_biking:"Rennrad", indoor_cycling:"Indoor-Rad", virtual_ride:"Virtuelle Ausfahrt", cycling:"Rad", gravel_cycling:"Gravel", mountain_biking:"MTB",
+  running:"Laufen", treadmill_running:"Laufband", trail_running:"Trail", strength_training:"Krafttraining", indoor_rowing:"Rudern"};
+const garminActs = d => ((state.garmin || {})[d] || {}).acts || [];
+function garminMatch(d, x) {
+  if (x.kind !== "bike" && x.kind !== "run") return [];
+  return garminActs(d).filter(a => a.kind === x.kind);
+}
+// explicit tick wins (true or false); otherwise a matching Garmin activity counts
+function isDone(d, x) {
+  const r = state.sessions[d] || {};
+  if (r.done === true || r.done === false) return r.done;
+  return garminMatch(d, x).length > 0;
+}
+function actLine(a) {
+  const parts = [GARMIN_TYPES[a.type] || a.name || "Aktivität"];
+  if (a.min) parts.push(`${Math.round(a.min)} min`);
+  if (a.km) parts.push(`${num(Math.round(a.km * 10) / 10)} km`);
+  if (a.w) parts.push(`${Math.round(a.w)} W`);
+  if (a.hr) parts.push(`Ø ${Math.round(a.hr)} bpm`);
+  return parts.join(" · ");
+}
+
 function renderDay() {
   const d = state.date, x = sessionFor(d), rec = state.sessions[d] || {};
-  const done = !!rec.done;
+  const done = isDone(d, x), auto = done && rec.done !== true && garminMatch(d, x).length > 0;
   let h = `<div class="daynav">
     <button class="iconbtn" id="prevDay" aria-label="Vorheriger Tag">‹</button>
     <div class="daytitle"><div class="d">${fmtLong(d)}</div>${d !== TODAY ? `<button class="today-link" id="toToday">Zu heute springen</button>` : `<span class="muted" style="font-size:13px">Heute · ${esc(phaseOf(d).label)}</span>`}</div>
@@ -593,8 +620,9 @@ function renderDay() {
       <span class="tag k-${x.kind}">${kindLabel[x.kind]}</span>
       <h2 style="margin-top:6px">${esc(x.title)}</h2>
       <div class="meta">${[x.dur, x.intensity].filter(Boolean).map(esc).join(" · ")}</div></div>
-      ${x.kind !== "rest" ? `<button class="donebtn" id="doneBtn" aria-pressed="${done}">${done ? "✓ Erledigt" : "Erledigt"}</button>` : ""}
+      ${x.kind !== "rest" ? `<button class="donebtn" id="doneBtn" aria-pressed="${done}">${done ? (auto ? "✓ Garmin" : "✓ Erledigt") : "Erledigt"}</button>` : ""}
     </div>`;
+  if (garminActs(d).length) h += `<div class="garmin">${garminActs(d).map(a => `<div><span class="gdot"></span>${esc(actLine(a))}${a.name && GARMIN_TYPES[a.type] ? ` <span class="muted">· ${esc(a.name)}</span>` : ""}</div>`).join("")}</div>`;
   if (x.kind === "strength") {
     const W = WORKOUTS[x.w], sp = strengthPhase(d);
     h += `<div class="phasebox"><b>${esc(sp.label)}</b><span>${esc(sp.info)}</span></div>
@@ -637,7 +665,7 @@ function renderDay() {
   document.getElementById("nextDay").onclick = () => { state.date = addDays(state.date, 1); render(); };
   const tt = document.getElementById("toToday"); if (tt) tt.onclick = () => { state.date = TODAY; render(); };
   const db_ = document.getElementById("doneBtn");
-  if (db_) db_.onclick = () => { const r = ensure(d); r.done = !r.done; persist("sessions/"+d, r, true); renderDay(); };
+  if (db_) db_.onclick = () => { const r = ensure(d); r.done = !isDone(d, x); persist("sessions/"+d, r, true); renderDay(); };
   $view.querySelectorAll("input[data-ex]").forEach(inp => inp.addEventListener("input", () => {
     const r = ensure(d), id = inp.dataset.ex, i = +inp.dataset.i;
     r.log = r.log || {}; r.log[id] = r.log[id] || [];
@@ -680,11 +708,12 @@ function renderWeek() {
   let rows = "";
   for (let i = 0; i < 7; i++) {
     const d = addDays(ws, i), x = sessionFor(d), r = state.sessions[d] || {}, hrs = durHours(x.dur);
-    planned += hrs; if (x.kind !== "rest") total++; if (r.done) { doneN++; doneH += hrs; }
+    const dn = isDone(d, x), gm = garminMatch(d, x), gmin = gm.reduce((t, a) => t + (a.min || 0), 0);
+    planned += hrs; if (x.kind !== "rest") total++; if (dn) { doneN++; doneH += gm.length && r.done !== true ? gmin / 60 : hrs; }
     rows += `<button class="wday${d === TODAY ? " is-today" : ""}" data-go="${d}">
       <div><div class="dname">${DAYS[parse(d).getDay()]}</div><div class="ddate">${fmtShort(d)}</div></div>
       <div style="min-width:0"><div class="wt">${esc(x.title)}</div><div class="wd"><span class="tag k-${x.kind}" style="margin-right:6px">${kindLabel[x.kind]}</span>${esc(x.dur || "")}</div></div>
-      ${x.kind === "rest" ? "<span></span>" : `<span class="check${r.done ? " on" : ""}" aria-label="${r.done ? "erledigt" : "offen"}">${r.done ? "✓" : ""}</span>`}
+      ${x.kind === "rest" ? "<span></span>" : `<span class="check${dn ? " on" : ""}" aria-label="${dn ? "erledigt" : "offen"}">${dn ? "✓" : ""}</span>`}
     </button>`;
   }
   const x0 = sessionFor(ws);
@@ -817,7 +846,7 @@ function renderPlan() {
   const off = document.getElementById("syncOff");
   if (off) off.onclick = () => { Sync.disconnect(); render(); document.getElementById("syncMsg").textContent = "Abgleich auf diesem Gerät ausgeschaltet. Deine Daten bleiben hier und im Gist erhalten."; };
   document.getElementById("exportBtn").onclick = () => {
-    const blob = new Blob([JSON.stringify({app:"trainingsplan", version:1, exported:new Date().toISOString(), settings:state.settings, sessions:state.sessions, weights:state.weights, custom:state.custom}, null, 1)], {type:"application/json"});
+    const blob = new Blob([JSON.stringify({app:"trainingsplan", version:1, exported:new Date().toISOString(), settings:state.settings, sessions:state.sessions, weights:state.weights, custom:state.custom, garmin:state.garmin}, null, 1)], {type:"application/json"});
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `trainingsplan-backup-${TODAY}.json`;
     document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
     document.getElementById("backupMsg").textContent = "Backup erstellt.";
@@ -828,7 +857,7 @@ function renderPlan() {
     f.text().then(t => {
       const j = JSON.parse(t);
       if (j.app !== "trainingsplan" || typeof j.sessions !== "object") throw new Error("format");
-      Object.assign(state.settings, j.settings || {}); state.sessions = j.sessions || {}; state.weights = j.weights || {}; state.custom = j.custom || {}; applyCustom();
+      Object.assign(state.settings, j.settings || {}); state.sessions = j.sessions || {}; state.weights = j.weights || {}; state.custom = j.custom || {}; state.garmin = j.garmin || {}; applyCustom();
       lsSave(); render();
       document.getElementById("backupMsg").textContent = `Backup vom ${fmtShort((j.exported || TODAY).slice(0,10))} geladen: ${Object.keys(state.sessions).length} Trainingstage, ${Object.keys(state.weights).length} Gewichtseinträge.`;
     }).catch(() => { msg.textContent = "Diese Datei ist kein Backup dieser App. Wähle die Datei „trainingsplan-backup-….json“."; });
